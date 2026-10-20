@@ -46,9 +46,10 @@ function header(title, opts) {
   } else {
     tag(title, PAD, HEAD_Y + 8, 0, C.white, 16, 2);
   }
-  if (opts.strip !== false) checkers(0, STRIP_Y, W, 3, 8);
+  // the blue checkered rule is gone from the menus
 }
 
+// a small lock glyph for the locked entries
 function lockIcon(x, y) {
   ui.fillStyle = 'rgba(226,232,240,0.55)';
   ui.fillRect(x - 6, y - 2, 12, 9);
@@ -320,7 +321,6 @@ const trackSelectScene = {
         tapArea('t' + i, cx, cy, cw, ch, () => { this.sel = i; this.pick(i); });
       }
     }
-    tag('Tap a track to race', W / 2, H - 26, 5, C.faint, 11, 1.6);
   },
 };
 
@@ -373,7 +373,7 @@ const carSelectScene = {
     // drag to spin (mouse or finger on the showroom)
     const dg = R3D.dragState;
     if (dg && dg.down && dg.dx !== 0) {
-      const dYaw = dg.dx * 1.6;
+      const dYaw = dg.dx * 2.4;
       this.yaw += dYaw;
       const inst = Math.max(-1500, Math.min(1500, dYaw / Math.max(dt, 1e-4)));
       this.spinVel = this.spinVel * 0.55 + inst * 0.45;
@@ -401,15 +401,18 @@ const carSelectScene = {
       renderer.setViewport(0, 0, W, H);
       ui.drawImage(R3D._gl, 0, 0, W, H);
     }
+    // dragging on the model spins it
+    R3D.dragArea('car', 0, 0, SHOP_W - 30, H);
 
-    header('Select car', { back: () => R3D.setScene(trackSelectScene), strip: false });
+    header('Select car', { back: () => R3D.setScene(trackSelectScene) });
     const locked = S().cars[this.sel] === 1;
     // the stat card sits under the model, clear of it
     plate(16, 250, 252, 92, { r: 2, fill: 'rgba(10,12,16,0.88)', topLine: 'rgba(255,255,255,0.10)' });
     if (locked) {
-      tag(D.lang[9], 30, 266, 0, C.accent, 12, 1.6);
-      const msgs = ['4x ' + D.lang[8], '8x ' + D.lang[60], '12x ' + D.lang[28]];
-      msgs.forEach((m, i) => tag(m, 30, 292 + i * 18, 0, C.dim, 11, 1.2));
+      tag(D.lang[9], 30, 268, 0, C.accent, 13, 1.8);
+      // just how it is locked, no explanation
+      const need = ['4x BRONZE', '8x SILVER', '12x GOLD'][this.sel - 1] || '';
+      tag(need, 30, 300, 0, C.dim, 12, 1.6);
     } else {
       const bars = [[D.lang[65], R3D.STAT_TOP], [D.lang[4], R3D.STAT_ACC], [D.lang[30], R3D.STAT_GRIP]];
       let y = 266;
@@ -434,7 +437,6 @@ const carSelectScene = {
       bigButton('race', COL_X, 250, COL_W, 56, 'Race!', () => this.start(), {
         active: true, center: true, size: 20, color: C.white, fill: 'rgba(255,196,0,0.12)', border: C.accent,
       });
-      tag('Drag the car to spin it', COL_X, 316, 0, C.faint, 11, 1.2);
     }
   },
 };
@@ -612,10 +614,9 @@ const resultsScene = {
     const g = R3D.game.results || { headline: '', time: 0 };
     const cw = 380, ch = 244;
     const x = Math.round((W - cw) / 2), y = Math.round((H - ch) / 2) + 4;
-    panel(x, y, cw, ch, { r: 2, fill: 'rgba(12,14,18,0.96)' });
-    checkers(x + 16, y + 16, cw - 32, 3, 8);
-    tag(g.headline, W / 2, y + 34, 5, C.accent, 19, 2);
-    let ty = y + 72;
+    panel(x, y, cw, ch, { r: 2, fill: 'rgba(12,14,18,0.96)', topLine: 'rgba(255,255,255,0.10)' });
+    tag(g.headline, W / 2, y + 30, 5, C.accent, 19, 2);
+    let ty = y + 68;
     if (g.medalText) { tag(g.medalText, W / 2, ty, 5, C.white, 14, 1.4); ty += 26; }
     text(D.lang[32] + ' ' + R3D.fmtTime(g.time), W / 2, ty, 5, C.white, 19, '700', 0, true); ty += 26;
     if (g.bestText) { tag(g.bestText, W / 2, ty, 5, C.faint, 12, 1.2); ty += 22; }

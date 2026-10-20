@@ -46,16 +46,16 @@ const CAMS = {
     label: 'Chase', off: [0, 3.2, -9.0], look: [0, 1.4, 8], lag: 25 / 6,
   },
   hood: {
-    // The model's real shape: the roof is at y = 2.01 over the cabin, the
-    // bonnet runs from y = 1.41 at z = 1.0 down to the nose at z = 2.73, and
-    // the front wheels sit at z = 1.5. Riding at the base of the windscreen
-    // and looking along the bonnet keeps the bodywork filling the bottom of
-    // the frame with no gap under it and no tyres in shot.
-    label: 'Hood', off: [0, 1.68, 0.35], look: [0, 1.05, 16], lag: 25 / 2.6,
+    // Placed from the car's own geometry: just above and behind the rear
+    // edge of the bonnet, looking along it. The pitch is set so the bottom
+    // of the frame lands exactly on that edge - the bodywork then runs off
+    // the bottom of the screen with no gap, and the front wheels (which
+    // sit below the bonnet line) stay out of shot.
+    label: 'Hood', off: [0, 1.51, 1.03], look: [0, 2.47, 17.03], lag: 25 / 2.6,
     rigid: true, clear: 0.45,
   },
   bumper: {
-    label: 'Bumper', off: [0, 0.55, 2.90], look: [0, 0.34, 22], lag: 25 / 2.6,
+    label: 'Bumper', off: [0, 0.55, 2.93], look: [0, 0.34, 22], lag: 25 / 2.6,
     rigid: true, clear: 0.35,
   },
   top: {
@@ -63,6 +63,20 @@ const CAMS = {
   },
 };
 const CAM_ORDER = ['chase', 'hood', 'bumper', 'top'];
+
+// The on-car cameras follow the shape of the car being driven. The hood
+// camera sits just behind the front bumper and a little above its top edge:
+// the car's nose then fills the bottom of the frame with no gap of road
+// showing under it, the front wheels are far behind the camera, and the
+// camera is below the line of the bonnet.
+function fitCamerasToCar(carIdx) {
+  const a = R3D.carAnchors(carIdx);
+  const hy = a.frontTop + 0.04, hz = a.frontZ - 0.23;
+  CAMS.hood.off = [0, hy, hz];
+  CAMS.hood.look = [0, hy - 0.14, hz + 16];
+  CAMS.bumper.off = [0, 0.55, a.noseZ + 0.20];
+  CAMS.bumper.look = [0, 0.34, a.noseZ + 0.20 + 19];
+}
 
 // camera framing for the landscape frame. With a 60 degree vertical lens and
 // the camera 9 units back, the world keeps EXACTLY the original's pixel
@@ -149,6 +163,7 @@ const raceScene = {
     this.azCnt = 0; this.cI = 0; this.coastT = 0;
     this.doneT = 0; this.orbitFrom = 0;
     this.camMode = CAMS[S().settings.camera] ? S().settings.camera : 'chase';
+    fitCamerasToCar(R3D.game.carIdx);
     this.horizon = H / 2;
     this.gold = this.track.medals[0];
     this.teleport(5);
@@ -541,6 +556,8 @@ const raceScene = {
       this.coastT = 2.4;
       this.doneT = 2.4;
       this.orbitFrom = this.camYaw;
+      // the victory shot is always from behind the car
+      this.finishCam = 'chase';
       AudioSys.stopMusic();
       AudioSys.sfx('goal');
       this.buildResults();
@@ -614,7 +631,9 @@ const raceScene = {
   // and barely lag at all.
   updateCamera(dt) {
     const done = this.phase === 'done' && this.doneT > 1 && this.coastT > 0;
-    const mode = CAMS[this.camMode] || CAMS.chase;
+    // after the finish the camera drops back to the chase view: sitting on
+    // the bonnet while the car coasts to a stop looks broken
+    const mode = (this.phase === 'done' && this.finishCam) ? CAMS[this.finishCam] : (CAMS[this.camMode] || CAMS.chase);
 
     if (done) {
       // the finish shot: swing around to the front of the car

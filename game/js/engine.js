@@ -103,6 +103,26 @@ R3D.buildCar = function (carIdx) {
   return grp;
 };
 
+// The four cars are different shapes - the "Azure racer" is longer and has a
+// higher bonnet than the "Red danger" - so the on-car cameras have to be
+// placed from the model's own geometry rather than from fixed numbers.
+// Returns the height and z of the bonnet's rear edge, the top of the front
+// bumper and the z of the nose.
+R3D.carAnchors = function (carIdx) {
+  const m = D.meshes['car' + (carIdx + 1)];
+  let hoodY = 1.41, hoodZ = 1.23, noseZ = 2.73, frontTop = 1.31, frontZ = 2.51;
+  for (const p of m.pos) {
+    const z = p[2], y = p[1];
+    if (z > noseZ) noseZ = z;
+    if (z >= 0.9 && z <= 1.4 && y > hoodY) { hoodY = y; hoodZ = z; }
+  }
+  for (const p of m.pos) {
+    const z = p[2], y = p[1];
+    if (z >= noseZ - 0.55 && z <= noseZ && y > frontTop) { frontTop = y; frontZ = z; }
+  }
+  return { hoodY, hoodZ, noseZ, frontTop, frontZ };
+};
+
 // ---------------------------------------------------------------- track world
 // Port of the original tile builder + renderer (r.java a(int,a,a,a) + h.a(String,int)):
 //  - tile = 32u: 3 cross-sections spaced 16u (cursor |16|, rotates 4x heading per step)

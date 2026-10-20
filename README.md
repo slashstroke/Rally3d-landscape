@@ -64,6 +64,21 @@ The touch controls can be hidden entirely — from the pause menu
 when you drive with tilt only, or when you want the screen clear for the
 scenery.
 
+## Gamepad
+
+Plug one in and it just works — the game asks for the first pad it finds.
+
+| Pad | Action |
+|-----|--------|
+| Left stick / d-pad | Steer |
+| Right stick | Steer as well |
+| Right trigger / A | Accelerate |
+| Left trigger / B | Brake |
+| Start | Pause menu |
+| A / B | Select / back in the menus |
+| X | Switch camera |
+| d-pad | Move through the menus |
+
 ## Cameras
 
 Four viewpoints, switched with the **C** key (during a race or from the pause
@@ -72,14 +87,17 @@ menu) or from *Pause → Settings → Camera*. The choice is remembered.
 | Camera | What you see |
 |--------|--------------|
 | **Chase** | The default: behind and above the car, with the original's trailing yaw so the car leads the camera into a corner. |
-| **Hood** | Over the windscreen, looking down the bonnet. |
-| **Bumper** | On the nose, at bumper height. The fastest, most committed view. |
+| **Hood** | Just behind the front bumper, below the line of the bonnet: the nose fills the bottom of the frame, the road runs right up to it and the front wheels never appear. |
+| **Bumper** | Ahead of the nose, at bumper height. The fastest, most committed view. |
 | **Top down** | From above, the nose pointing up the screen — the rally driver's view of a corner entry. |
 
-The hood and bumper cameras are bolted to the car: they do not lag, and they
-are lifted if the road rises above them, so a crest or a jump can never
-swallow the view. The background scenery is pinned to the horizon of
+The hood and bumper cameras are placed from the shape of the car being driven,
+so they fit all four models, and they are bolted to the car: no vertical lag,
+and they are lifted if the road rises above them, so a crest or a jump can
+never swallow the view. The background scenery is pinned to the horizon of
 whichever camera is active, so the sky and the distant hills always line up.
+When you cross the finish line the camera always drops back to the chase view
+for the run out.
 
 Keyboard still works for desktop testing: arrows / WASD, Enter = OK,
 Esc = back, P = pause.

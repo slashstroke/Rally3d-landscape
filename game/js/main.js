@@ -20,9 +20,10 @@ const renderer = new THREE.WebGLRenderer({
   canvas: glCanvas, antialias: false, alpha: true, preserveDrawingBuffer: true,
 });
 renderer.setClearColor(0x000000, 0);
-// the near plane has to be close: the hood and bumper cameras sit within a
-// unit of the car, and anything nearer than the old 1-unit plane was clipped
-const camera = new THREE.PerspectiveCamera(52, W / H, 0.25, 128);
+// the near plane has to be close: the hood camera sits a few centimetres
+// from the bodywork, and anything nearer than the old 1-unit plane was
+// clipped away
+const camera = new THREE.PerspectiveCamera(52, W / H, 0.08, 160);
 R3D._renderer = renderer;
 R3D._camera = camera;
 R3D._gl = glCanvas;
@@ -479,15 +480,85 @@ window.addEventListener('blur', releaseAllHolds);
 window.addEventListener('pagehide', releaseAllHolds);
 document.addEventListener('visibilitychange', () => { if (document.hidden) releaseAllHolds(); });
 
+// ---- gamepad -------------------------------------------------------------
+// Any standard mapping: left stick or d-pad steers, the right trigger or A
+// accelerates, B or the left trigger brakes, Start pauses, and the shoulder
+// buttons / stick move the menus.
+const pad = { index: -1, prev: [], connected: false };
+
+function readPad() {
+  if (!navigator.getGamepads) return null;
+  const pads = navigator.getGamepads();
+  for (let i = 0; i < pads.length; i++) {
+    if (pads[i] && pads[i].connected) return pads[i];
+  }
+  return null;
+}
+
+const DEAD = 0.28;
+function axis(v) { return Math.abs(v) < DEAD ? 0 : v; }
+
+function pollGamepad() {
+  const gp = readPad();
+  if (!gp) {
+    if (pad.connected) { pad.connected = false; pad.index = -1; }
+    return;
+  }
+  if (!pad.connected) {
+    pad.connected = true;
+    pad.index = gp.index;
+    R3D.toast('Gamepad connected');
+  }
+  const ax = gp.axes || [];
+  const btn = gp.buttons || [];
+  const down = (i) => !!(btn[i] && btn[i].pressed);
+  const prev = pad.prev;
+  const pressed = (i) => down(i) && !prev[i];
+
+  // steering: the left stick, or the d-pad
+  const stick = axis(ax[0] || 0);
+  let l = stick < 0, r = stick > 0;
+  if (btn[14] && btn[14].pressed) l = true;
+  if (btn[15] && btn[15].pressed) r = true;
+
+  // throttle / brake
+  const rt = btn[7] ? (btn[7].value || 0) : 0;
+  const lt = btn[6] ? (btn[6].value || 0) : 0;
+  const up = rt > 0.15 || down(0) || down(3);
+  const downB = lt > 0.35 || down(1) || down(2);
+
+  // menu / actions
+  if (pressed(9)) PRESSED.PAUSE = true;         // Start
+  if (pressed(0)) PRESSED.OK = true;             // A
+  if (pressed(1)) PRESSED.BACK = true;          // B
+  if (pressed(12)) PRESSED.UP = true;            // d-pad up
+  if (pressed(13)) PRESSED.DOWN = true;          // d-pad down
+  if (pressed(14)) PRESSED.LEFT = true;
+  if (pressed(15)) PRESSED.RIGHT = true;
+  if (pressed(2)) PRESSED.CAM = true;           // X
+  if (down(4) || down(5)) { /* shoulders: reserved */ }
+  // the right stick also steers, for pads without a d-pad
+  const rstick = axis(ax[2] || 0);
+  if (rstick < 0) l = true;
+  if (rstick > 0) r = true;
+
+  pad.state = { l, r, up, down: downB };
+  // remember the button states for edge detection
+  for (let i = 0; i < btn.length; i++) prev[i] = !!(btn[i] && btn[i].pressed);
+}
+
 // merge everything into the driving state each frame
 R3D.pollInput = function () {
+  pollGamepad();
+  const g = pad.state;
   const t = tilt.enabled ? tilt.value : 0;
-  keys.L = keyState.L || holdCount.L > 0 || t < -0.12;
-  keys.R = keyState.R || holdCount.R > 0 || t > 0.12;
-  keys.U = keyState.U || holdCount.U > 0;
-  keys.D = keyState.D || holdCount.D > 0;
+  keys.L = keyState.L || holdCount.L > 0 || t < -0.12 || (g && g.l);
+  keys.R = keyState.R || holdCount.R > 0 || t > 0.12 || (g && g.r);
+  keys.U = keyState.U || holdCount.U > 0 || (g && g.up);
+  keys.D = keyState.D || holdCount.D > 0 || (g && g.down);
   R3D.tiltActive = tilt.enabled && Math.abs(t) > 0.05;
 };
+R3D.gamepadConnected = () => pad.connected;
 
 // ------------------------------------------------------------------ save
 const SAVE_KEY = 'r3d_save_landscape_v1';
@@ -765,7 +836,7 @@ function drawToasts(dt) {
     const x = (W - w) / 2;
     ui.save();
     ui.globalAlpha = Math.max(0, Math.min(1, a));
-    panel(x, y, w, 34, { r: 2, fill: 'rgba(10,12,15,0.94)', borderColor: C.accent2 });
+    plate(x, y, w, 34, { r: 2, fill: 'rgba(10,12,15,0.94)', borderColor: C.accent2 });
     tag(t.msg, W / 2, y + 11, 5, C.white, 13, 1);
     ui.restore();
     y += 40;
