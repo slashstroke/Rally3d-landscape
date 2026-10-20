@@ -852,7 +852,11 @@ function drawToasts(dt) {
 R3D._loop = function () {
   requestAnimationFrame(function frame(ts) {
     requestAnimationFrame(frame);
-    const dt = Math.min(0.05, (ts - last) / 1000 || 0.016);
+    // the physics uses a capped dt so a slow frame cannot blow it up, but
+    // the screen transition uses the real elapsed time - otherwise a throttled
+    // tab stretches a 0.4s wipe into several seconds of black screen
+    const rawDt = Math.min(0.25, (ts - last) / 1000 || 0.016);
+    const dt = Math.min(0.05, rawDt);
     last = ts;
     clock += dt;
     R3D.clock = clock;
@@ -861,7 +865,7 @@ R3D._loop = function () {
 
     let dx = 0, cover = -1;
     if (trans.dir === 1) {
-      trans.t = Math.min(1, trans.t + dt / 0.18);
+      trans.t = Math.min(1, trans.t + rawDt / 0.18);
       const e = ease(trans.t);
       dx = -12 * e;
       cover = e;
@@ -871,7 +875,7 @@ R3D._loop = function () {
         applyScene(nx);                   // throwing enter() cannot wedge it
       }
     } else if (trans.dir === -1) {
-      trans.t = Math.max(0, trans.t - dt / 0.22);
+      trans.t = Math.max(0, trans.t - rawDt / 0.22);
       const e = ease(trans.t);
       dx = 12 * e;
       cover = e;
@@ -881,11 +885,15 @@ R3D._loop = function () {
     if (scene) {
       if (trans.dir === 0 && scene.menuMusic && !(scene.musicT > 0)) R3D.ensureMenuMusic();
       R3D.clearHits();
-      scene.update(dt);
+      // a scene that throws must not wedge the game: the transition still
+      // finishes and the screen is never left stuck under the shutter
+      try { scene.update(dt); } catch (e) { console.error(e); }
       ui.save();
-      if (dx) ui.translate(dx, 0);
-      scene.draw();
-      ui.restore();
+      try {
+        if (dx) ui.translate(dx, 0);
+        scene.draw();
+      } catch (e) { console.error(e); }
+      finally { ui.restore(); }
     }
     if (cover >= 0) drawCover(cover);
     drawToasts(dt);

@@ -48,6 +48,9 @@ class Handler(SimpleHTTPRequestHandler):
 
     def end_headers(self):
         self.send_header("Access-Control-Allow-Origin", "*")
+        # never cache during development, or a stale script looks like a bug
+        self.send_header("Cache-Control", "no-store, must-revalidate")
+        self.send_header("Pragma", "no-cache")
         super().end_headers()
 
     def log_message(self, fmt, *args):
