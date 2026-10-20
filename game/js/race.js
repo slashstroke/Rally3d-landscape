@@ -28,16 +28,14 @@ const THEMES = R3D.themeColors;
 const textMid = R3D.textMid, tagMid = R3D.tagMid;
 
 // ------------------------------------------------------------------ cameras
-// Five viewpoints, all in the car's own frame (x = right, y = up, z = front):
+// Four viewpoints, all in the car's own frame (x = right, y = up, z = front):
 //   off  - where the camera sits
 //   look - what it points at
 //   lag  - how fast the camera frame follows the car's yaw (the original
 //          chase cam trails noticeably; the rigid ones barely lag at all)
-// The car's own model is 5.45 long (nose at z = 2.73), 2.65 wide and 2.02
-// tall, so the on-car cameras have to sit clear of the bodywork.
 //
 //  chase  - behind and above, the original's trailing yaw
-//  hood   - over the windscreen, looking down the bonnet
+//  hood   - at the base of the windscreen, looking along the bonnet
 //  bumper - on the nose, at bumper height
 //  top    - from above, the nose pointing up the screen
 //
@@ -48,7 +46,12 @@ const CAMS = {
     label: 'Chase', off: [0, 3.2, -9.0], look: [0, 1.4, 8], lag: 25 / 6,
   },
   hood: {
-    label: 'Hood', off: [0, 1.72, 0.55], look: [0, 0.70, 16], lag: 25 / 2.6,
+    // The model's real shape: the roof is at y = 2.01 over the cabin, the
+    // bonnet runs from y = 1.41 at z = 1.0 down to the nose at z = 2.73, and
+    // the front wheels sit at z = 1.5. Riding at the base of the windscreen
+    // and looking along the bonnet keeps the bodywork filling the bottom of
+    // the frame with no gap under it and no tyres in shot.
+    label: 'Hood', off: [0, 1.68, 0.35], look: [0, 1.05, 16], lag: 25 / 2.6,
     rigid: true, clear: 0.45,
   },
   bumper: {
