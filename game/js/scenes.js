@@ -478,6 +478,7 @@ const settingsScene = {
       { label: 'Motion blur', right: st.motionBlur === 0 ? 'off' : 'on' },
       { label: 'Lighting', right: st.lighting === 0 ? 'off' : 'on' },
       { label: 'Shadows', right: st.shadows === 0 ? 'off' : 'on' },
+      { label: 'Camera shake', right: st.shake === 0 ? 'off' : 'on' },
     ];
   },
   pick(i) {
@@ -485,7 +486,8 @@ const settingsScene = {
     if (this.page === 1) {
       if (i === 0) st.motionBlur = (st.motionBlur + 1) % 2;
       else if (i === 1) st.lighting = (st.lighting + 1) % 2;
-      else st.shadows = (st.shadows + 1) % 2;
+      else if (i === 2) st.shadows = (st.shadows + 1) % 2;
+      else st.shake = (st.shake + 1) % 2;
       R3D.persist();
       if (R3D.raceScene && R3D.raceScene.rebuildGraphics) R3D.raceScene.rebuildGraphics();
       return;
@@ -527,18 +529,18 @@ const settingsScene = {
       header('Graphics', { back: () => { this.page = 0; this.sel = 6; } });
       const items = this.gfxItems();
       menuColumn(items, (i) => { this.sel = i; this.pick(i); }, { x: COL_X, y: 96, h: 40, gap: 8, sel: this.sel });
-      panel(PAD, 84, 300, 196, { r: 2, fill: PLATE_SOFT });
+      panel(PAD, 84, 300, 208, { r: 2, fill: PLATE_SOFT });
       tag('Graphics', PAD + 18, 98, 0, C.accent, 12, 2);
       const tips = [
         'Motion blur smears the edges of the',
         'screen when you pick up speed.',
         '',
         'Lighting puts a sun on the hills and',
-        'the car.',
+        'the car. Shadows drop it onto the road.',
         '',
-        'Shadows drop the car onto the road.',
+        'Camera shake rattles the whole frame.',
       ];
-      tips.forEach((t, i) => text(t, PAD + 18, 128 + i * 21, 0, C.dim, 12, '500'));
+      tips.forEach((t, i) => text(t, PAD + 18, 126 + i * 21, 0, C.dim, 12, '500'));
       return;
     }
     header(D.lang[107], { back: 'title' });

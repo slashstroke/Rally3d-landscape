@@ -255,6 +255,7 @@ const raceScene = {
         { label: 'Motion blur', right: st.motionBlur === 0 ? 'off' : 'on' },
         { label: 'Lighting', right: st.lighting === 0 ? 'off' : 'on' },
         { label: 'Shadows', right: st.shadows === 0 ? 'off' : 'on' },
+        { label: 'Camera shake', right: st.shake === 0 ? 'off' : 'on' },
         { label: 'Auto acceleration', right: st.auto === 1 ? 'on' : 'off' },
         { label: 'Speed units', right: [D.lang[66], D.lang[67]][st.units] },
       ];
@@ -274,7 +275,8 @@ const raceScene = {
       else if (i === 2) st.motionBlur = (st.motionBlur + 1) % 2;
       else if (i === 3) st.lighting = (st.lighting + 1) % 2;
       else if (i === 4) st.shadows = (st.shadows + 1) % 2;
-      else if (i === 5) st.auto = (st.auto + 1) % 2;
+      else if (i === 5) st.shake = (st.shake + 1) % 2;
+      else if (i === 6) st.auto = (st.auto + 1) % 2;
       else st.units = (st.units + 1) % 2;
       R3D.persist();
       if (i >= 2 && i <= 4) this.rebuildGraphics();
@@ -749,7 +751,8 @@ const raceScene = {
     const scale = this.camMode === 'hood' || this.camMode === 'bumper' ? 0.4 : 1;
     // in screen pixels - a couple of pixels is a rattle, more than that is a
     // wobble
-    const amt = this.shakeAmount() * 4.0 * scale;
+    if (S().settings.shake === 0) { this.shakeX = 0; this.shakeY = 0; return; }
+    const amt = this.shakeAmount() * 1.1 * scale;
     let ox = 0, oy = 0;
     if (amt >= 0.02) {
       this.shakeT = (this.shakeT || 0) + dt * (14 + 16 * Math.min(1, this.speed / 4));
@@ -823,7 +826,7 @@ const raceScene = {
   // -------------------------------------------------- draw
   draw() {
     const th = this.tc;
-    const bg = R3D._bgImg[this.theme];
+    const bg = R3D.bgCanvas(this.theme) || R3D._bgImg[this.theme];
     const bgW = bg.width * BG_SCALE, bgH = bg.height * BG_SCALE;
     // the background art is pinned to the horizon of whichever camera is
     // active; looking straight down there is no horizon, so it is skipped

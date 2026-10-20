@@ -149,7 +149,7 @@
       }
       await wait(600);
     }
-    window.__carY = R.currentScene() ? R.currentScene().pos.y : -1;
+    window.__carY = (R.currentScene() && R.currentScene().pos) ? R.currentScene().pos.y : -1;
     document.title = 'ready';
   }).catch((e) => { document.title = 'error: ' + e.message + ' | same=' + (window.R3D.currentScene() === window.R3D.raceScene) + ' | cur=' + (window.R3D.currentScene() ? Object.keys(window.R3D).filter(k => window.R3D[k] === window.R3D.currentScene()).join(',') : 'null') + ' | fn=' + (window.R3D.raceScene && typeof window.R3D.raceScene.setCamera) + ' | race=' + (typeof (window.R3D && window.R3D.raceScene)) + ' | ' + (window.__errs || []).join(' ; '); });
 </script>

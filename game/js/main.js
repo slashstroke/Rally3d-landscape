@@ -580,7 +580,7 @@ function defSave() {
     names, scores,
     champ: 0,
     settings: { sound: 2, units: 0, auto: 0, titleSong: 0, tilt: 0, buttons: 1, camera: 'chase',
-                motionBlur: 1, lighting: 1, shadows: 1 },
+                motionBlur: 1, lighting: 1, shadows: 1, shake: 1 },
     name: D.lang[68],
   };
 }
@@ -905,8 +905,8 @@ R3D.uiTheme = function () {
 };
 
 R3D.drawBackground = function (theme) {
-  const img = theme && R3D._bgImg ? R3D._bgImg[theme] : null;
-  if (img && img.complete && img.width) {
+  const img = theme ? R3D.bgCanvas(theme) : null;
+  if (img && img.width) {
     const s = Math.max(W / img.width, H / img.height);
     const w = img.width * s, h = img.height * s;
     ui.drawImage(img, (W - w) / 2, (H - h) / 2, w, h);

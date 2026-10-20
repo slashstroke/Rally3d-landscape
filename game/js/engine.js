@@ -85,6 +85,33 @@ function synGeometry(m) {
   return g;
 }
 
+// The background panoramas do not wrap - the left and right edges of the art
+// are completely different - so tiling them puts a hard vertical seam every
+// tile. Mirroring the art into a double-width strip makes it tile seamlessly,
+// which matters more than it sounds: a seam that jitters with the camera
+// shake reads as the whole screen breaking up.
+R3D._bgCanvas = {};
+function seamlessBg(theme, img) {
+  if (R3D._bgCanvas[theme]) return R3D._bgCanvas[theme];
+  const c = document.createElement('canvas');
+  c.width = img.width * 2;
+  c.height = img.height;
+  const g = c.getContext('2d');
+  g.drawImage(img, 0, 0);
+  g.save();
+  g.translate(c.width, 0);
+  g.scale(-1, 1);
+  g.drawImage(img, 0, 0);
+  g.restore();
+  R3D._bgCanvas[theme] = c;
+  return c;
+}
+R3D.bgCanvas = function (theme) {
+  const img = R3D._bgImg && R3D._bgImg[theme];
+  if (!img || !img.complete || !img.width) return null;
+  return seamlessBg(theme, img);
+};
+
 R3D.buildCar = function (carIdx, lit, cast) {
   const grp = new THREE.Group();
   // With lighting on the body picks up the sun; the texture is painted, so the
