@@ -85,7 +85,7 @@ function synGeometry(m) {
   return g;
 }
 
-R3D.buildCar = function (carIdx, lit) {
+R3D.buildCar = function (carIdx, lit, cast) {
   const grp = new THREE.Group();
   // With lighting on the body picks up the sun; the texture is painted, so the
   // light only adds form, it does not repaint the car.
@@ -93,6 +93,7 @@ R3D.buildCar = function (carIdx, lit) {
     ? new THREE.MeshLambertMaterial({ map: TEX['car' + (carIdx + 1)] })
     : new THREE.MeshBasicMaterial({ map: TEX['car' + (carIdx + 1)] });
   const body = new THREE.Mesh(synGeometry(D.meshes['car' + (carIdx + 1)]), mat);
+  body.castShadow = !!(lit && cast);
   grp.add(body);
   const wmat = new THREE.MeshBasicMaterial({ map: TEX.wheel });
   const wg = synGeometry(D.meshes.wheel);
@@ -107,42 +108,28 @@ R3D.buildCar = function (carIdx, lit) {
   return grp;
 };
 
-// The sun and the fill light for the car.
+// The sun and the fill light for the track and the car. The sun casts a real
+// shadow, but only over a small box that follows the car - a shadow map
+// across the whole track ribbon would be far too heavy for a phone.
 R3D.buildLights = function (scene) {
-  const sun = new THREE.DirectionalLight(0xfff2d8, 0.5);
-  sun.position.set(0.40, 0.82, 0.41).multiplyScalar(30);
-  const ambient = new THREE.AmbientLight(0xffffff, 0.55);
+  const sun = new THREE.DirectionalLight(0xfff4e0, 0.55);
+  sun.position.set(SUN[0], SUN[1], SUN[2]).multiplyScalar(26);
+  sun.castShadow = true;
+  sun.shadow.mapSize.set(1024, 1024);
+  const d = 13;
+  sun.shadow.camera.left = -d;
+  sun.shadow.camera.right = d;
+  sun.shadow.camera.top = d;
+  sun.shadow.camera.bottom = -d;
+  sun.shadow.camera.near = 1;
+  sun.shadow.camera.far = 60;
+  sun.shadow.bias = -0.0015;
+  sun.shadow.normalBias = 0.6;
+  const ambient = new THREE.AmbientLight(0xffffff, 0.62);
   scene.add(sun);
+  scene.add(sun.target);
   scene.add(ambient);
   return { sun: sun, ambient: ambient };
-};
-
-// A soft blob under the car - the contact shadow. A real shadow map over the
-// whole track ribbon would be far too heavy for a phone, and a contact
-// shadow is what actually sells the car sitting on the road.
-R3D.buildShadow = function () {
-  const c = document.createElement('canvas');
-  c.width = c.height = 64;
-  const g = c.getContext('2d');
-  const rad = g.createRadialGradient(32, 32, 2, 32, 32, 31);
-  rad.addColorStop(0, 'rgba(0,0,0,0.85)');
-  rad.addColorStop(0.55, 'rgba(0,0,0,0.42)');
-  rad.addColorStop(1, 'rgba(0,0,0,0)');
-  g.fillStyle = rad;
-  g.fillRect(0, 0, 64, 64);
-  const tex = new THREE.CanvasTexture(c);
-  tex.minFilter = THREE.LinearFilter;
-  tex.generateMipmaps = false;
-  const mat = new THREE.MeshBasicMaterial({
-    map: tex, transparent: true, depthWrite: false, opacity: 0.55,
-  });
-  const mesh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), mat);
-  // yaw first, then lay it flat - the order matters or the blob ends up on
-  // its edge
-  mesh.rotation.order = 'YXZ';
-  mesh.rotation.set(-Math.PI / 2, 0, 0);
-  mesh.renderOrder = 2;
-  return mesh;
 };
 
 // The four cars are different shapes - the "Azure racer" is longer and has a
@@ -171,8 +158,7 @@ R3D.carAnchors = function (carIdx) {
 //  - cross-section points H[0..7]: left side -nv[0,2,4,6], right side +pv[6,4,2,0]
 //    (H0/H7 outermost terrain edge, H3/H4 road edges at profile col6)
 //  - strip k spans H[k]..H[k+1]; strip 3 = road
-// The sun the terrain is lit by (direction it comes FROM), and the option
-// to bake that into the track's vertex colours.
+// The sun the terrain is lit by (direction it comes FROM).
 const SUN = [0.40, 0.82, 0.41];
 R3D.SUN = SUN;
 
@@ -330,9 +316,16 @@ R3D.buildTrack = function (track, opts) {
   // (the 2D background + haze show instead). Per-tile meshes let race.js toggle
   // that window every frame — distant elevated strands no longer float in the sky.
   const texW = 256;
-  const trackMat = new THREE.MeshBasicMaterial({
-    map: TEX['squares_' + theme], vertexColors: true, side: THREE.DoubleSide,
-  });
+  // With the lighting on the track uses a lit material, so the sun picks out
+  // the slopes and the car can drop a real shadow onto the road. With it off
+  // the original flat, unlit look comes back.
+  const trackMat = LIGHT
+    ? new THREE.MeshLambertMaterial({
+      map: TEX['squares_' + theme], vertexColors: true, side: THREE.DoubleSide,
+    })
+    : new THREE.MeshBasicMaterial({
+      map: TEX['squares_' + theme], vertexColors: true, side: THREE.DoubleSide,
+    });
   const tileMeshes = [];
   for (let ti = 0; ti < tiles.length; ti++) {
     const t = tiles[ti];
@@ -357,22 +350,10 @@ R3D.buildTrack = function (track, opts) {
         // variant j station 0 carries variant j-1 station 2, so brightness is
         // continuous along the whole track AND across tile boundaries.
         const brA = varr[q][sec], brB = varr[q + 1][sec];
-        // A sun term: the slopes that face the light are brighter, the ones
-        // turned away are darker. It is baked into the vertex colours, so the
-        // terrain gets form without any per-frame lighting cost.
-        let la = 1, lb = 1;
-        if (LIGHT) {
-          const nx = (Ba.y - Aa.y) * (Ab.z - Aa.z) - (Ba.z - Aa.z) * (Ab.y - Aa.y);
-          const ny = (Ba.z - Aa.z) * (Ab.x - Aa.x) - (Ba.x - Aa.x) * (Ab.z - Aa.z);
-          const nz = (Ba.x - Aa.x) * (Ab.y - Aa.y) - (Ba.y - Aa.y) * (Ab.x - Aa.x);
-          const len = Math.sqrt(nx * nx + ny * ny + nz * nz) || 1;
-          const d = Math.abs((nx * SUN[0] + ny * SUN[1] + nz * SUN[2]) / len);
-          la = lb = 0.62 + 0.42 * d;
-        }
-        colors.push(brA[0] / 255 * la, brA[0] / 255 * la, brA[0] / 255 * la,
-                    brA[1] / 255 * la, brA[1] / 255 * la, brA[1] / 255 * la,
-                    brB[0] / 255 * lb, brB[0] / 255 * lb, brB[0] / 255 * lb,
-                    brB[1] / 255 * lb, brB[1] / 255 * lb, brB[1] / 255 * lb);
+        colors.push(brA[0] / 255, brA[0] / 255, brA[0] / 255,
+                    brA[1] / 255, brA[1] / 255, brA[1] / 255,
+                    brB[0] / 255, brB[0] / 255, brB[0] / 255,
+                    brB[1] / 255, brB[1] / 255, brB[1] / 255);
         // u per section: terrain strips keep texel 31 on the road-side vertex;
         // road strip: right edge texel 1, left edge texel 31 (r.java s4/s5 rule)
         const cell = ncols[sec] * 32;
@@ -389,7 +370,10 @@ R3D.buildTrack = function (track, opts) {
     geo.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
     geo.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
     geo.setIndex(indices);
-    tileMeshes.push(new THREE.Mesh(geo, trackMat));
+    if (LIGHT) geo.computeVertexNormals();   // the sun needs them
+    const mesh = new THREE.Mesh(geo, trackMat);
+    mesh.receiveShadow = LIGHT;
+    tileMeshes.push(mesh);
   }
 
   // per-tile section walkability flags (r.java K[]): K[0..2] from the LEFT row

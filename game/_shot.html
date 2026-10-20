@@ -27,13 +27,13 @@
   <canvas id="ui" width="640" height="360"></canvas>
   <div id="boot">loading…</div>
 </div>
-<script src="js/three.min.js?v=2"></script>
-<script src="js/data.js?v=2"></script>
-<script src="js/tinysynth.js?v=2"></script>
-<script src="js/engine.js?v=2"></script>
-<script src="js/main.js?v=2"></script>
-<script src="js/scenes.js?v=2"></script>
-<script src="js/race.js?v=2"></script>
+<script src="js/three.min.js?v=3"></script>
+<script src="js/data.js?v=3"></script>
+<script src="js/tinysynth.js?v=3"></script>
+<script src="js/engine.js?v=3"></script>
+<script src="js/main.js?v=3"></script>
+<script src="js/scenes.js?v=3"></script>
+<script src="js/race.js?v=3"></script>
 <script>
   const q = new URLSearchParams(location.search);
   const num = (k, d) => (q.has(k) ? parseFloat(q.get(k)) : d);
@@ -56,6 +56,7 @@
     if (q.has('light')) st.lighting = num('light', 1);
     if (q.has('shadow')) st.shadows = num('shadow', 1);
     if (q.has('car')) R.game.carIdx = num('car', 0);
+    if (q.has('mode')) R.game.mode = q.get('mode');
     // the boot transition may still be running; a second setScene would be
     // dropped while one is pending
     for (let i = 0; i < 100 && R.isTransitioning && R.isTransitioning(); i++) await wait(100);
@@ -71,6 +72,10 @@
       if (q.get('cam')) sc.setCamera(q.get('cam'));
       if (q.get('pause')) { sc.paused = true; sc.pausePage = num('pause', 0) ? 1 : 0; }
       await wait(400);
+    } else if (scene === 'newgame') {
+      R.setScene(R.newGameScene);
+      await waitScene(R.newGameScene);
+      await wait(300);
     } else if (scene === 'carselect') {
       R.setScene(R.carSelectSceneRef);
       await waitScene(R.carSelectSceneRef);

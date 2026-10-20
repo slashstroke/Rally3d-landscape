@@ -209,64 +209,26 @@ const newGameScene = {
     return [
       { label: D.lang[17], right: '12 races' },   // Championship
       { label: D.lang[71] },                       // Time trial
+      { label: 'Multiplayer', right: '1 opponent' },
     ];
   },
   pick(i) {
-    if (i === 0) { R3D.game.mode = 'champ'; R3D.setScene(nextRaceScene); }
-    else { R3D.game.mode = 'tt'; R3D.setScene(trackSelectScene); }
+    if (i === 0) { R3D.game.mode = 'champ'; R3D.setScene(trackSelectScene); }
+    else if (i === 1) { R3D.game.mode = 'tt'; R3D.setScene(trackSelectScene); }
+    else { R3D.game.mode = 'mp'; R3D.setScene(trackSelectScene); }
   },
   update() {
-    if (wasPressed('DOWN')) this.sel = (this.sel + 1) % 2;
-    if (wasPressed('UP')) this.sel = (this.sel + 1) % 2;
+    const n = this.items().length;
+    if (wasPressed('DOWN')) this.sel = (this.sel + 1) % n;
+    if (wasPressed('UP')) this.sel = (this.sel + n - 1) % n;
     if (wasPressed('OK')) this.pick(this.sel);
   },
   draw() {
     R3D.drawBackground(R3D.uiTheme());
     header(D.lang[100], { back: 'title' });
     logo(30, 92, 240);
-    tag('Choose a mode', 30, 150, 0, C.dim, 12, 2);
-    menuColumn(this.items(), (i) => { this.sel = i; this.pick(i); }, { sel: this.sel, y: 110 });
-  },
-};
-
-// ==================================================================== CHAMPIONSHIP HUB
-const nextRaceScene = {
-  menuMusic: true,
-  enter() {
-    R3D.clearScene3d();
-    camera.position.set(0, 0, 0);
-    camera.rotation.set(0, 0, 0);
-  },
-  update() {
-    if (wasPressed('OK')) {
-      R3D.game.mode = 'champ';
-      R3D.game.raceIdx = S().champ % 12;
-      R3D.setScene(trackSelectScene);
-    }
-  },
-  draw() {
-    R3D.drawBackground(R3D.uiTheme());
-    header(D.lang[17], { back: () => R3D.setScene(newGameScene) });
-    const idx = S().champ % 12;
-    const tr = D.tracks[idx];
-    panel(PAD, 82, 300, 158, { r: 2, fill: PLATE_SOFT });
-    tag('Next race', PAD + 18, 96, 0, C.accent, 11, 2);
-    text(tr.name, PAD + 18, 116, 0, C.white, 24, '700', 0, true);
-    tag('Track ' + (idx + 1) + ' of 12', PAD + 18, 152, 0, C.dim, 12, 1.4);
-    tag('Medals earned', PAD + 18, 180, 0, C.dim, 11, 1.4);
-    for (let i = 0; i < 12; i++) {
-      const m = S().medals[i];
-      ui.beginPath();
-      ui.arc(PAD + 24 + i * 22, 212, 7, 0, Math.PI * 2);
-      ui.fillStyle = m <= 2 ? (m === 0 ? '#ffc400' : m === 1 ? '#dfe6f0' : '#cd7f45') : 'rgba(255,255,255,0.12)';
-      ui.fill();
-      if (m <= 2) { ui.strokeStyle = 'rgba(0,0,0,0.5)'; ui.lineWidth = 1; ui.stroke(); }
-    }
-    bigButton('go', COL_X, 148, COL_W, 60, D.lang[41], () => {
-      R3D.game.mode = 'champ';
-      R3D.game.raceIdx = S().champ % 12;
-      R3D.setScene(trackSelectScene);
-    }, { active: true, center: true, size: 18, fill: 'rgba(255,196,0,0.15)', border: C.accent });
+    tag('Choose a mode', 30, 152, 0, C.dim, 12, 2);
+    menuColumn(this.items(), (i) => { this.sel = i; this.pick(i); }, { sel: this.sel, y: 96 });
   },
 };
 
@@ -291,7 +253,7 @@ const trackSelectScene = {
   },
   draw() {
     R3D.drawBackground(R3D.uiTheme());
-    header(D.lang[58], { back: () => R3D.setScene(R3D.game.mode === 'champ' ? nextRaceScene : newGameScene) });
+    header(D.lang[58], { back: () => R3D.setScene(newGameScene) });
     const cols = 4, cw = 142, ch = 74, gx = 14, gy = 12;
     const gridW = cols * cw + (cols - 1) * gx;
     const x0 = Math.round((W - gridW) / 2), y0 = 82;
@@ -648,8 +610,9 @@ const resultsScene = {
     if (wasPressed('OK') || wasPressed('BACK')) this.leave();
   },
   leave() {
-    if (R3D.game.mode === 'champ') R3D.setScene(nextRaceScene);
-    else R3D.setScene(trackSelectScene);
+    // back to the track list either way - the championship moves on to the
+    // next race from there
+    R3D.setScene(trackSelectScene);
   },
   draw() {
     R3D.drawBackground(R3D.uiTheme());
@@ -677,7 +640,6 @@ R3D.STAT_ACC = [20, 60, 90, 80];
 R3D.STAT_GRIP = [40, 80, 80, 90];
 R3D.titleScene = titleScene;
 R3D.resultsScene = resultsScene;
-R3D.nextRaceScene = nextRaceScene;
 R3D.trackSelectScene = trackSelectScene;
 R3D.carSelectSceneRef = carSelectScene;
 R3D.newGameScene = newGameScene;

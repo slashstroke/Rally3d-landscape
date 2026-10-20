@@ -20,6 +20,11 @@ const renderer = new THREE.WebGLRenderer({
   canvas: glCanvas, antialias: false, alpha: true, preserveDrawingBuffer: true,
 });
 renderer.setClearColor(0x000000, 0);
+// Shadows are always compiled in so toggling them never recompiles the
+// materials; the sun only casts when the player asks for it, and three.js
+// skips the shadow pass entirely when nothing casts.
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFShadowMap;
 // the near plane has to be close: the hood camera sits a few centimetres
 // from the bodywork, and anything nearer than the old 1-unit plane was
 // clipped away

@@ -85,13 +85,24 @@ Settings → *Graphics*, or the same three rows in the in-race pause menu.
 
 | Option | What it does |
 |--------|--------------|
-| **Motion blur** | A radial blur that grows with your speed, so the edges of the screen smear as you accelerate. The centre stays sharp. |
+| **Motion blur** | A radial blur that grows with your speed. Only the far edges of the screen smear — the car and the road ahead stay sharp, so it reads as speed rather than as a smudge. |
 | **Lighting** | Puts a sun on the track: the slopes that face the light are brighter, the ones turned away are darker, and the car picks up the same light. |
-| **Shadows** | Drops a soft contact shadow under the car so it sits on the road instead of floating over it. The shadow fades as the car leaves the ground. |
+| **Shadows** | A real shadow map. The car casts a shadow onto the road that moves with it; the shadow box follows the car, so the map only ever has to cover the road around you. |
 
-The lighting is baked into the terrain's vertex colours when the track is built,
-so it costs nothing per frame. Turning a setting on in the pause menu rebuilds
-what it affects straight away — no restart.
+Changing a setting rebuilds what it affects on the spot — no restart, and the
+race carries on.
+
+## Modes
+
+*New game* offers three ways to play:
+
+- **Championship** — the twelve races in order, with the medal rules of the
+  original. It goes straight to the track list.
+- **Time trial** — one track against the clock.
+- **Multiplayer** — the same track list, but the race has an AI opponent
+  driving the racing line beside you. The HUD shows your position
+  (`POS. 1/2`); the opponent slows for the corners, so it can be caught.
+
 
 ## Cameras
 

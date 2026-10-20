@@ -146,15 +146,12 @@ const raceScene = {
     R3D.clearScene3d();
     const sc = new THREE.Scene();
     for (const m of this.world.tileMeshes) sc.add(m);
-    this.car = R3D.buildCar(R3D.game.carIdx, gfx.lighting !== 0);
+    this.car = R3D.buildCar(R3D.game.carIdx, gfx.lighting !== 0, gfx.shadows !== 0);
     sc.add(this.car);
     this.lights = R3D.buildLights(sc);
     this.setLightLevel(gfx.lighting !== 0);
-    this.shadow = R3D.buildShadow();
-    this.shadow.scale.set(3.4, 4.6, 1);
-    this.shadow.visible = gfx.shadows !== 0;
-    sc.add(this.shadow);
     this.buildPropBillboards(sc);
+    this.setupAI(sc);
     R3D.scene3d = sc;
     camera.aspect = W / H;
     camera.updateProjectionMatrix();
@@ -232,6 +229,7 @@ const raceScene = {
     if (this.phase === 'racing') {
       if (this.goT > 0) this.goT -= dt;
       this.step(dt);
+      this.updateAI(dt);
       this.updateCamera(dt);
       return;
     }
@@ -291,7 +289,7 @@ const raceScene = {
     } else {
       this.paused = false;
       R3D.clearScene3d();
-      R3D.setScene(R3D.game.mode === 'champ' ? R3D.nextRaceScene : R3D.trackSelectScene);
+      R3D.setScene(R3D.newGameScene);
     }
   },
 
@@ -724,19 +722,28 @@ const raceScene = {
 
   // the contact shadow follows the car and fades as it leaves the ground
   updateShadow() {
-    if (!this.shadow || !this.shadow.visible) return;
-    const g = R3D.sampleGround(this.world, this.pos.x, this.pos.z, this.segHint);
-    const y = g ? g.y : this.pos.y;
-    this.shadow.position.set(this.pos.x, y + 0.10, this.pos.z);
-    this.shadow.rotation.set(-Math.PI / 2, (180 - this.yaw) * Math.PI / 180, 0);
-    const air = Math.max(0, this.pos.y - y);
-    this.shadow.material.opacity = 0.5 * Math.max(0, 1 - air * 0.5);
+    if (!this.lights) return;
+    const sun = this.lights.sun;
+    // the shadow box follows the car, so the map only has to cover the road
+    // right around it instead of the whole track
+    sun.target.position.set(this.pos.x, this.pos.y, this.pos.z);
+    sun.position.set(
+      this.pos.x + R3D.SUN[0] * 26,
+      this.pos.y + R3D.SUN[1] * 26,
+      this.pos.z + R3D.SUN[2] * 26
+    );
+    sun.target.updateMatrixWorld();
   },
 
   setLightLevel(on) {
     if (!this.lights) return;
-    this.lights.sun.intensity = on ? 0.5 : 0;
-    this.lights.ambient.intensity = on ? 0.55 : 1.0;
+    const st = S().settings;
+    const shadows = on && st.shadows !== 0;
+    this.lights.sun.intensity = on ? 0.55 : 0;
+    this.lights.ambient.intensity = on ? 0.62 : 1.0;
+    this.lights.sun.castShadow = shadows;
+    if (this.car) this.car.children[0].castShadow = shadows;
+    if (this.ai) this.ai.car.children[0].castShadow = shadows;
   },
 
   // a graphics setting changed: rebuild what it affects, without touching the
@@ -752,11 +759,16 @@ const raceScene = {
     this.world = R3D.buildTrack(this.track, { lighting: gfx.lighting !== 0 });
     for (const m of this.world.tileMeshes) sc.add(m);
     const old = this.car;
-    this.car = R3D.buildCar(R3D.game.carIdx, gfx.lighting !== 0);
+    this.car = R3D.buildCar(R3D.game.carIdx, gfx.lighting !== 0, gfx.shadows !== 0);
     sc.add(this.car);
     sc.remove(old);
+    if (this.ai) {
+      const oldAi = this.ai.car;
+      this.ai.car = R3D.buildCar(this.ai.idx, gfx.lighting !== 0, gfx.shadows !== 0);
+      sc.add(this.ai.car);
+      sc.remove(oldAi);
+    }
     this.setLightLevel(gfx.lighting !== 0);
-    if (this.shadow) this.shadow.visible = gfx.shadows !== 0;
   },
 
   // -------------------------------------------------- draw
@@ -793,6 +805,56 @@ const raceScene = {
     if (this.phase === 'prerace') this.drawPreRace();
   },
 
+  // -------------------------------------------------- the AI opponent
+  // It drives the racing line: the track's stations are 16 units apart, so
+  // the opponent is a position along that path, slowing for the corners.
+  setupAI(scene) {
+    if (R3D.game.mode !== 'mp') { this.ai = null; return; }
+    const idx = (R3D.game.carIdx + 1) % 4;
+    const gfx = S().settings;
+    const car = R3D.buildCar(idx, gfx.lighting !== 0, gfx.shadows !== 0);
+    scene.add(car);
+    this.ai = { car: car, idx: idx, dist: 5 * 3 * 16, speed: 0, start: 5 * 3 * 16 };
+  },
+
+  updateAI(dt) {
+    const ai = this.ai;
+    if (!ai) return;
+    const sts = this.world.stations;
+    const n = sts.length - 1;
+    const top = TOPS[ai.idx] / 10;
+    const i = Math.floor(ai.dist / 16) % n;
+    const a = sts[i], b = sts[(i + 1) % n];
+    // how hard the next corner is
+    const ya = Math.atan2(a.fx, -a.fz), yb = Math.atan2(b.fx, -b.fz);
+    let turn = Math.abs(yb - ya);
+    if (turn > Math.PI) turn = Math.PI * 2 - turn;
+    const target = top * (0.95 - Math.min(0.42, turn * 1.1));
+    ai.speed += (target - ai.speed) * Math.min(1, dt * 1.6);
+    ai.dist += ai.speed * dt * SPEED_K;
+    if (ai.dist > n * 16) ai.dist = ai.start;      // one lap, then it loops
+    // place it on the line
+    const g = ai.dist / 16;
+    const k = Math.floor(g) % n, t = g - Math.floor(g);
+    const p0 = sts[k], p1 = sts[(k + 1) % n];
+    ai.car.position.set(
+      p0.x + (p1.x - p0.x) * t,
+      p0.y + (p1.y - p0.y) * t,
+      p0.z + (p1.z - p0.z) * t
+    );
+    const yaw = Math.atan2(p1.x - p0.x, -(p1.z - p0.z)) * 180 / Math.PI;
+    ai.car.rotation.order = 'YZX';
+    ai.car.rotation.set(0, (180 - yaw) * Math.PI / 180, 0);
+  },
+
+  // where the player is relative to the opponent: 1 = leading
+  racePosition() {
+    if (!this.ai) return 1;
+    const mine = (this.segHint || 0) * 16;
+    const theirs = this.ai.dist;
+    return mine >= theirs ? 1 : 2;
+  },
+
   // -------------------------------------------------- motion blur
   // The scene is rendered into a texture and then drawn again through a
   // radial (zoom) blur that grows with the speed - the classic speed-blur
@@ -823,7 +885,9 @@ const raceScene = {
         'void main() {',
         '  vec2 dir = vUv - 0.5;',
         '  float d = length(dir);',
-        '  float amt = strength * smoothstep(0.08, 0.62, d);',
+        // only the far edges smear - the middle of the screen (the car and
+        // the road ahead) stays sharp
+        '  float amt = strength * smoothstep(0.30, 0.85, d);',
         '  vec4 sum = vec4(0.0);',
         '  float wsum = 0.0;',
         '  for (int i = 0; i < 8; i++) {',
@@ -847,12 +911,14 @@ const raceScene = {
     this.blurScene.add(this.blurQuad);
   },
 
-  // how hard the blur should be right now
+  // how hard the blur should be right now. The centre of the screen is left
+  // alone - that is where the car and the road ahead are, and smearing them
+  // is what makes the effect feel broken rather than fast.
   blurAmount() {
     if (S().settings.motionBlur === 0) return 0;
     const top = TOPS[R3D.game.carIdx] / 10;
-    const k = (this.speed - top * 0.40) / (top * 0.60);
-    return Math.max(0, Math.min(1, k)) * 0.16;
+    const k = (this.speed - top * 0.45) / (top * 0.55);
+    return Math.max(0, Math.min(1, k)) * 0.075;
   },
 
   renderScene() {
@@ -949,18 +1015,27 @@ const raceScene = {
 
     // ---- top left: pause box + data panel
     this.pauseButton();
-    const dx = 52, dw = 148;
-    plate(dx, top, dw, plateH, { topLine: 'rgba(255,255,255,0.10)' });
     const total = this.finishSeg || 1;
     const prog = Math.max(0, Math.min(1, (this.segHint || 0) / total));
-    const rowY = [top + plateH * 0.27, top + plateH * 0.75];
-    tagMid('Dist.', dx + 10, rowY[0], 0, C.dim, 10, 0.9);
-    textMid(Math.round(prog * 100) + '%', dx + dw - 10, rowY[0], 8, C.white, 15, '700', 0, true);
-    ui.fillStyle = 'rgba(255,255,255,0.09)';
-    ui.fillRect(dx + 10, top + plateH * 0.5, dw - 20, 1);
-    tagMid('Split', dx + 10, rowY[1], 0, C.dim, 10, 0.9);
-    textMid(this.splitVal || '--:--', dx + dw - 10, rowY[1], 8,
-      this.splitVal ? (this.splitGood ? C.green : C.red) : C.faint, 15, '700', 0, true);
+    // the position only shows when there is somebody to race
+    const rows = [];
+    if (this.ai) rows.push(['Pos.', this.racePosition() + '/2', C.white]);
+    rows.push(['Dist.', Math.round(prog * 100) + '%', C.white]);
+    rows.push(['Split', this.splitVal || '--:--',
+      this.splitVal ? (this.splitGood ? C.green : C.red) : C.faint]);
+    const dx = 52, dw = 148;
+    const rowH = 21;
+    const panelH = 8 + rows.length * rowH;
+    plate(dx, top, dw, panelH, { topLine: 'rgba(255,255,255,0.10)' });
+    rows.forEach((r, i) => {
+      const y = top + 4 + rowH * (i + 0.5);
+      tagMid(r[0], dx + 10, y, 0, C.dim, 10, 0.9);
+      textMid(r[1], dx + dw - 10, y, 8, r[2], 15, '700', 0, true);
+      if (i < rows.length - 1) {
+        ui.fillStyle = 'rgba(255,255,255,0.09)';
+        ui.fillRect(dx + 10, top + 4 + rowH * (i + 1), dw - 20, 1);
+      }
+    });
 
     // ---- top right: speed box
     const sx = W - 146, sw = 130;
