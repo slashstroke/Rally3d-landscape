@@ -79,8 +79,13 @@
       sc.timeT = num('time', 412);
       sc.speed = num('speed', 4.3);
       if (q.get('cam')) sc.setCamera(q.get('cam'));
+      if (q.has('air')) {
+        const lift = num('air', 3);
+        const orig = sc.step.bind(sc);
+        sc.step = (dt) => { orig(dt); sc.pos.y += lift; };
+      }
       if (q.get('pause')) { sc.paused = true; sc.pausePage = num('pause', 0) ? 1 : 0; }
-      await wait(400);
+      await wait(q.has('air') ? 2500 : 500);
     } else if (scene === 'newgame') {
       R.setScene(R.newGameScene);
       await waitScene(R.newGameScene);
@@ -122,7 +127,7 @@
       await waitScene(R.raceScene);
       const sc2 = R.currentScene();
       sc2.phase = 'racing'; sc2.goT = 0; sc2.timeT = 300; sc2.speed = num('speed', 3);
-      await wait(600);
+      await wait(q.has('air') ? 2200 : 600);
     }
     // walk the whole flow: new game -> a mode -> a track -> race
     if (q.get('flow')) {
@@ -136,8 +141,15 @@
       await waitScene(R.raceScene, 6000);
       const sc3 = R.currentScene();
       sc3.phase = 'racing'; sc3.goT = 0; sc3.timeT = 400; sc3.speed = num('speed', 3);
+      // lift the car off the ground to look at the shadow in the air
+      if (q.has('air')) {
+        const lift = num('air', 3);
+        const orig = sc3.step.bind(sc3);
+        sc3.step = (dt) => { orig(dt); sc3.pos.y += lift; };
+      }
       await wait(600);
     }
+    window.__carY = R.currentScene() ? R.currentScene().pos.y : -1;
     document.title = 'ready';
   }).catch((e) => { document.title = 'error: ' + e.message + ' | same=' + (window.R3D.currentScene() === window.R3D.raceScene) + ' | cur=' + (window.R3D.currentScene() ? Object.keys(window.R3D).filter(k => window.R3D[k] === window.R3D.currentScene()).join(',') : 'null') + ' | fn=' + (window.R3D.raceScene && typeof window.R3D.raceScene.setCamera) + ' | race=' + (typeof (window.R3D && window.R3D.raceScene)) + ' | ' + (window.__errs || []).join(' ; '); });
 </script>

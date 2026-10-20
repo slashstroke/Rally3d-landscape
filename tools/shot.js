@@ -97,6 +97,10 @@ function cdp(ws) {
     } catch (e) { /* keep waiting */ }
   }
   await sleep(1200);            // let the transition and the first frames settle
+  try {
+    const dy = await send('Runtime.evaluate', { expression: 'window.__carY', returnByValue: true });
+    if (dy.result && dy.result.value !== undefined) console.log('carY=' + dy.result.value);
+  } catch (e) { /* ignore */ }
   const shot = await send('Page.captureScreenshot', { format: 'png' });
   const out = path.join(__dirname, '..', 'shots', name + '.png');
   fs.mkdirSync(path.dirname(out), { recursive: true });

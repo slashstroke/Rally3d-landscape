@@ -112,20 +112,27 @@ R3D.buildCar = function (carIdx, lit, cast) {
 // shadow, but only over a small box that follows the car - a shadow map
 // across the whole track ribbon would be far too heavy for a phone.
 R3D.buildLights = function (scene) {
-  const sun = new THREE.DirectionalLight(0xfff4e0, 0.55);
-  sun.position.set(SUN[0], SUN[1], SUN[2]).multiplyScalar(26);
+  const sun = new THREE.DirectionalLight(0xfff4e0, 0.85);
+  sun.position.set(SUN[0], SUN[1], SUN[2]).multiplyScalar(22);
   sun.castShadow = true;
   sun.shadow.mapSize.set(1024, 1024);
-  const d = 13;
+  // a tight box around the car: more texels on the road, and a short
+  // near/far range so the depth comparison stays precise
+  const d = 9;
   sun.shadow.camera.left = -d;
   sun.shadow.camera.right = d;
   sun.shadow.camera.top = d;
   sun.shadow.camera.bottom = -d;
-  sun.shadow.camera.near = 1;
-  sun.shadow.camera.far = 60;
-  sun.shadow.bias = -0.0015;
-  sun.shadow.normalBias = 0.6;
-  const ambient = new THREE.AmbientLight(0xffffff, 0.62);
+  sun.shadow.camera.near = 8;
+  sun.shadow.camera.far = 40;
+  // The bias is in shadow-map depth units, so it has to be scaled to the
+  // depth range: with near 8 / far 40 that is 32 world units, and -0.0016
+  // buys about 5cm of offset - enough to kill the acne where the car meets
+  // the road, but not so much that the shadow detaches from the bodywork.
+  sun.shadow.bias = -0.0016;
+  sun.shadow.normalBias = 0.02;
+  sun.shadow.radius = 1.5;
+  const ambient = new THREE.AmbientLight(0xffffff, 0.42);
   scene.add(sun);
   scene.add(sun.target);
   scene.add(ambient);
@@ -159,7 +166,7 @@ R3D.carAnchors = function (carIdx) {
 //    (H0/H7 outermost terrain edge, H3/H4 road edges at profile col6)
 //  - strip k spans H[k]..H[k+1]; strip 3 = road
 // The sun the terrain is lit by (direction it comes FROM).
-const SUN = [0.40, 0.82, 0.41];
+const SUN = [0.44, 0.64, 0.44];
 R3D.SUN = SUN;
 
 R3D.buildTrack = function (track, opts) {

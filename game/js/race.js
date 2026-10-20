@@ -697,6 +697,7 @@ const raceScene = {
       const l = toWorld(look[0], look[1], look[2]);
       camera.lookAt(l.x, l.y, l.z);
     }
+    this.applyShake(dt, camera);
     this.setHorizonFromLook();
     this.placeCar();
   },
@@ -720,6 +721,49 @@ const raceScene = {
     );
   },
 
+  // -------------------------------------------------- camera shake
+  // How much the camera should rattle: the faster you go and the more the
+  // suspension is working, the more. The bumpiness comes from how fast the
+  // car's attitude is changing - a steady slope gives a constant roll, which
+  // should not shake the camera at all. Kept deliberately small: it is there
+  // to make the speed felt, not to make the screen hard to read.
+  shakeAmount() {
+    const top = TOPS[R3D.game.carIdx] / 10;
+    const speedK = Math.max(0, Math.min(1, this.speed / top));
+    const dRoll = this.prevRoll === undefined ? 0 : Math.abs(this.roll - this.prevRoll);
+    const dPitch = this.prevPitch === undefined ? 0 : Math.abs(this.pitch - this.prevPitch);
+    const dY = this.prevY === undefined ? 0 : Math.abs(this.pos.y - this.prevY);
+    // how much the suspension is working: the car changing attitude and
+    // bouncing over the road
+    const rough = Math.max(0, Math.min(1, (dRoll + dPitch) * 4 + dY * 6));
+    // speed always gives a little rattle, rough ground gives a lot more
+    return speedK * speedK * (0.22 + rough * 0.55);
+  },
+
+  applyShake(dt, cam) {
+    // the on-car cameras are bolted to the body, so they rattle far less
+    const scale = this.camMode === 'hood' || this.camMode === 'bumper' ? 0.35 : 1;
+    const amt = this.shakeAmount() * 0.35 * scale;
+    if (amt >= 0.0015) {
+      this.shakeT = (this.shakeT || 0) + dt * (16 + 18 * Math.min(1, this.speed / 4));
+      const t = this.shakeT;
+      // a couple of out-of-step waves read as a rattle, not as a wobble
+      const sx = Math.sin(t * 1.9) * 0.6 + Math.sin(t * 4.3 + 1.1) * 0.4;
+      const sy = Math.sin(t * 2.6 + 0.7) * 0.5 + Math.sin(t * 5.7) * 0.5;
+      const rad = this.camYaw * Math.PI / 180;
+      // the car's right axis, so the shake is across the road and never tilts
+      const rx = Math.cos(rad), rz = Math.sin(rad);
+      cam.position.x += rx * sx * amt;
+      cam.position.z += rz * sx * amt;
+      cam.position.y += sy * amt;
+    }
+    // remember where the car was, so the next frame can see how much the
+    // suspension moved
+    this.prevRoll = this.roll;
+    this.prevPitch = this.pitch;
+    this.prevY = this.pos.y;
+  },
+
   // the contact shadow follows the car and fades as it leaves the ground
   updateShadow() {
     if (!this.lights) return;
@@ -728,9 +772,9 @@ const raceScene = {
     // right around it instead of the whole track
     sun.target.position.set(this.pos.x, this.pos.y, this.pos.z);
     sun.position.set(
-      this.pos.x + R3D.SUN[0] * 26,
-      this.pos.y + R3D.SUN[1] * 26,
-      this.pos.z + R3D.SUN[2] * 26
+      this.pos.x + R3D.SUN[0] * 22,
+      this.pos.y + R3D.SUN[1] * 22,
+      this.pos.z + R3D.SUN[2] * 22
     );
     sun.target.updateMatrixWorld();
   },
@@ -739,8 +783,8 @@ const raceScene = {
     if (!this.lights) return;
     const st = S().settings;
     const shadows = on && st.shadows !== 0;
-    this.lights.sun.intensity = on ? 0.55 : 0;
-    this.lights.ambient.intensity = on ? 0.62 : 1.0;
+    this.lights.sun.intensity = on ? 0.85 : 0;
+    this.lights.ambient.intensity = on ? 0.42 : 1.0;
     this.lights.sun.castShadow = shadows;
     if (this.car) this.car.children[0].castShadow = shadows;
     if (this.ai) this.ai.car.children[0].castShadow = shadows;

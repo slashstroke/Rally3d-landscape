@@ -89,6 +89,12 @@ Settings → *Graphics*, or the same three rows in the in-race pause menu.
 | **Lighting** | Puts a sun on the track: the slopes that face the light are brighter, the ones turned away are darker, and the car picks up the same light. |
 | **Shadows** | A real shadow map. The car casts a shadow onto the road that moves with it; the shadow box follows the car, so the map only ever has to cover the road around you. |
 
+The camera also picks up a **shake** as you drive: a small rattle that grows
+with the square of your speed and gets rougher where the suspension is
+working, so crests and broken tarmac come through. The on-car cameras (hood,
+bumper) rattle far less, since they are bolted to the body. It is deliberately
+small — the HUD never shakes, so the readouts stay readable.
+
 Changing a setting rebuilds what it affects on the spot — no restart, and the
 race carries on.
 
