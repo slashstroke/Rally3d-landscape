@@ -16,8 +16,8 @@ const ui = document.getElementById('ui').getContext('2d');
 const renderer = R3D._renderer, camera = R3D._camera;
 const S = () => R3D.saveObj;
 const C = R3D.colors;
-const text = R3D.text, tag = R3D.tag, panel = R3D.panel, checkers = R3D.checkers,
-      roundRect = R3D.roundRect, measure = R3D.measure,
+const text = R3D.text, tag = R3D.tag, panel = R3D.panel, plate = R3D.plate,
+      checkers = R3D.checkers, roundRect = R3D.roundRect, measure = R3D.measure,
       wasPressed = R3D.wasPressed, AudioSys = R3D.audio,
       tapArea = R3D.tapArea, holdArea = R3D.holdArea;
 
@@ -25,6 +25,32 @@ const SPEED_K = R3D.SPEED_K;
 const TOPS = R3D.STAT_TOP;
 const KMH = 15, MPH = 9.5;
 const THEMES = R3D.themeColors;
+const textMid = R3D.textMid, tagMid = R3D.tagMid;
+
+// ------------------------------------------------------------------ cameras
+// Five viewpoints, all in the car's own frame (x = right, y = up, z = front):
+//   off  - where the camera sits
+//   look - what it points at
+//   lag  - how fast the camera frame follows the car's yaw (the original
+//          chase cam trails noticeably; the rigid ones barely lag at all)
+const CAMS = {
+  chase: {
+    label: 'Chase', off: [0, 3.2, -9.0], look: [0, 1.4, 8], lag: 25 / 6, pitch: 7.5,
+  },
+  hood: {
+    label: 'Hood', off: [0, 1.18, 1.55], look: [0, 0.95, 18], lag: 25 / 2.6, pitch: 0,
+  },
+  bumper: {
+    label: 'Bumper', off: [0, 0.52, 2.30], look: [0, 0.62, 20], lag: 25 / 2.6, pitch: 0,
+  },
+  top: {
+    label: 'Top down', off: [0, 12.5, -0.6], look: [0, 0, 0], lag: 25 / 2, pitch: 0,
+  },
+  cine: {
+    label: 'Cinematic', off: [0, 2.3, -7.5], look: [0, 1.0, 0], lag: 25 / 3, pitch: 0, orbit: 0.30,
+  },
+};
+const CAM_ORDER = ['chase', 'hood', 'bumper', 'top', 'cine'];
 
 // camera framing for the landscape frame. With a 60 degree vertical lens and
 // the camera 9 units back, the world keeps EXACTLY the original's pixel
@@ -32,19 +58,14 @@ const THEMES = R3D.themeColors;
 // and the distant scenery read exactly like the portrait original - only the
 // frame is wider, which is what a landscape phone screen gives us.
 const FOV = 60;                  // vertical field of view (degrees)
-const CAM_BACK = 9.0;            // units behind the car
-const CAM_UP = 3.2;              // units above the car
-const CAM_PITCH = 7.5 * Math.PI / 180;   // the camera looks slightly down
 const HALF_FOV = FOV * Math.PI / 360;
 const K0 = 2 * Math.tan(HALF_FOV);
 // the 2D prop billboards are sized in screen pixels; this keeps them the same
 // size relative to the 3D world as in the 240x320 portrait build
 const PROP_K = (H / K0) / (320 / (2 * Math.tan(30 * Math.PI / 180)));
-// where the horizon lands on screen (the background art is aligned to it)
-const HORIZON = H / 2 - (H / 2) * Math.tan(CAM_PITCH) / Math.tan(HALF_FOV);
 const BG_SCALE = R3D.PIX;
 const BG_SCROLL = (W / (2 * Math.atan(Math.tan(HALF_FOV) * (W / H)) * 180 / Math.PI)) / BG_SCALE;
-R3D.view = { FOV, CAM_BACK, CAM_UP, CAM_PITCH, HORIZON, BG_SCALE, BG_SCROLL, PROP_K, HALF_FOV };
+R3D.view = { FOV, HALF_FOV, BG_SCALE, BG_SCROLL, PROP_K, CAMS };
 
 function sheetKey(theme, code) {
   if (code === 0 || code === 4) return 'bb_' + theme + '_1';
@@ -115,10 +136,13 @@ const raceScene = {
     this.finishSeg = this.track.finish * 3 + 2;
     this.azCnt = 0; this.cI = 0; this.coastT = 0;
     this.doneT = 0; this.orbitFrom = 0;
+    this.camMode = CAMS[S().settings.camera] ? S().settings.camera : 'chase';
+    this.cineT = 0;
+    this.horizon = H / 2;
     this.gold = this.track.medals[0];
     this.teleport(5);
     this.camYaw = this.yaw;
-    this.camY = this.pos.y + CAM_UP;
+    this.camY = this.pos.y + CAMS.chase.off[1];
     this.camPos.set(this.pos.x, this.camY, this.pos.z);
     AudioSys.stopMusic();
   },
@@ -139,6 +163,7 @@ const raceScene = {
   },
 
   update(dt) {
+    if (wasPressed('CAM')) this.cycleCamera();
     if (this.paused) { this.pauseInput(); return; }
     if ((this.phase === 'racing' || this.phase === 'countdown') &&
         (wasPressed('PAUSE') || wasPressed('BACK'))) {
@@ -194,6 +219,8 @@ const raceScene = {
     if (this.pausePage === 1) {
       const st = S().settings;
       return [
+        { label: 'Camera', right: (CAMS[this.camMode] || CAMS.chase).label },
+        { label: 'Touch controls', right: st.buttons === 0 ? 'hidden' : 'shown' },
         { label: 'Auto acceleration', right: st.auto === 1 ? 'on' : 'off' },
         { label: 'Speed units', right: [D.lang[66], D.lang[67]][st.units] },
       ];
@@ -208,7 +235,9 @@ const raceScene = {
   pausePick(i) {
     if (this.pausePage === 1) {
       const st = S().settings;
-      if (i === 0) st.auto = (st.auto + 1) % 2;
+      if (i === 0) this.cycleCamera();
+      else if (i === 1) st.buttons = (st.buttons + 1) % 2;
+      else if (i === 2) st.auto = (st.auto + 1) % 2;
       else st.units = (st.units + 1) % 2;
       R3D.persist();
       return;
@@ -224,6 +253,19 @@ const raceScene = {
       R3D.clearScene3d();
       R3D.setScene(R3D.game.mode === 'champ' ? R3D.nextRaceScene : R3D.trackSelectScene);
     }
+  },
+
+  // ---- camera ----
+  cycleCamera() {
+    const i = CAM_ORDER.indexOf(this.camMode);
+    this.setCamera(CAM_ORDER[(i + 1) % CAM_ORDER.length]);
+  },
+  setCamera(mode) {
+    if (!CAMS[mode]) return;
+    this.camMode = mode;
+    this.cineT = 0;
+    S().settings.camera = mode;
+    R3D.persist();
   },
   pauseInput() {
     const n = this.pauseItems().length;
@@ -554,27 +596,56 @@ const raceScene = {
     R3D.persist();
   },
 
-  // -------------------------------------------------- camera (landscape chase cam)
+  // -------------------------------------------------- camera
+  // The chase cam keeps the original's trailing yaw (the car visibly leads
+  // the camera into a corner). The other viewpoints are mounted on the car
+  // and barely lag at all, and the cinematic one drifts around it.
   updateCamera(dt) {
-    const cine = this.phase === 'done' && this.doneT > 1 && this.coastT > 0;
-    if (cine) {
+    const done = this.phase === 'done' && this.doneT > 1 && this.coastT > 0;
+    const mode = CAMS[this.camMode] || CAMS.chase;
+
+    if (done) {
+      // the finish shot: swing around to the front of the car
       const t = 1 - this.coastT / this.doneT;
       const e = t * t * (3 - 2 * t);
       const target = this.yaw + 180;
       this.camYaw = this.orbitFrom + (target - this.orbitFrom) * e;
     } else {
-      this.camYaw += (this.yaw - this.camYaw) * (1 - Math.exp(-dt * 25 / 6));
+      this.camYaw += (this.yaw - this.camYaw) * (1 - Math.exp(-dt * mode.lag));
     }
     const rad = this.camYaw * Math.PI / 180;
-    const targetY = this.pos.y + CAM_UP;
-    this.camY += (targetY - this.camY) * (1 - Math.exp(-dt * 25 / 1.6));
-    this.camPos.set(
-      this.pos.x - Math.sin(rad) * CAM_BACK,
-      this.camY,
-      this.pos.z + Math.cos(rad) * CAM_BACK
-    );
+    const cy = Math.cos(rad), sy = Math.sin(rad);
+
+    // camera frame -> world (same convention as the wheel offsets)
+    const toWorld = (lx, ly, lz) => ({
+      x: this.pos.x + lx * cy - lz * sy,
+      y: this.pos.y + ly,
+      z: this.pos.z + lx * sy + lz * cy,
+    });
+
+    let off = mode.off, look = mode.look;
+    if (mode.orbit) {
+      // the cinematic camera circles the car in world space
+      this.cineT = (this.cineT || 0) + dt * mode.orbit;
+      const a = this.cineT;
+      const c = this.pos;
+      off = [Math.sin(a) * 7.5, 2.3 + Math.sin(a * 0.7) * 0.6, Math.cos(a) * 7.5];
+      look = [0, 1.0, 0];
+      const wp = { x: c.x + off[0], y: c.y + off[1], z: c.z + off[2] };
+      this.camPos.set(wp.x, wp.y, wp.z);
+      camera.position.copy(this.camPos);
+      camera.lookAt(this.pos.x, this.pos.y + 1.0, this.pos.z);
+      this.setHorizonFromLook();
+      this.placeCar();
+      return;
+    }
+
+    const p = toWorld(off[0], off[1], off[2]);
+    this.camY += (p.y - this.camY) * (1 - Math.exp(-dt * 25 / 1.6));
+    this.camPos.set(p.x, this.camY, p.z);
     camera.position.copy(this.camPos);
-    if (cine) {
+
+    if (done) {
       const t = 1 - this.coastT / this.doneT;
       const k = Math.min(1, t * 4);
       camera.lookAt(
@@ -583,15 +654,23 @@ const raceScene = {
         this.camPos.z - Math.cos(rad) * 10 * (1 - k) + (this.pos.z - this.camPos.z) * k
       );
     } else {
-      // level-ish look, pitched slightly down so the car sits in the lower
-      // third of a landscape frame and more of the road is visible
-      const cp = Math.cos(CAM_PITCH), sp = Math.sin(CAM_PITCH);
-      camera.lookAt(
-        this.camPos.x + Math.sin(rad) * 20 * cp,
-        this.camPos.y - 20 * sp,
-        this.camPos.z - Math.cos(rad) * 20 * cp
-      );
+      const l = toWorld(look[0], look[1], look[2]);
+      camera.lookAt(l.x, l.y, l.z);
     }
+    this.setHorizonFromLook();
+    this.placeCar();
+  },
+
+  // the 2D background is aligned to the horizon, so the horizon has to follow
+  // whichever camera is active
+  setHorizonFromLook() {
+    const d = camera.getWorldDirection(this._dirV || (this._dirV = new THREE.Vector3()));
+    const pitch = Math.asin(Math.max(-1, Math.min(1, d.y)));   // negative = looking down
+    if (pitch < -1.2) { this.horizon = null; return; }          // looking straight down
+    this.horizon = H / 2 - (H / 2) * Math.tan(-pitch) / Math.tan(HALF_FOV);
+  },
+
+  placeCar() {
     this.car.position.copy(this.pos);
     this.car.rotation.order = 'YZX';
     this.car.rotation.set(
@@ -606,13 +685,20 @@ const raceScene = {
     const th = this.tc;
     const bg = R3D._bgImg[this.theme];
     const bgW = bg.width * BG_SCALE, bgH = bg.height * BG_SCALE;
-    const y0 = Math.round(HORIZON - 110 * BG_SCALE);
-    let x0 = Math.floor((-(this.camYaw * BG_SCROLL) % bgW + bgW * 4) % bgW) - bgW;
+    // the background art is pinned to the horizon of whichever camera is
+    // active; looking straight down there is no horizon, so it is skipped
+    const hy = this.horizon;
     ui.fillStyle = '#000'; ui.fillRect(0, 0, W, H);
-    if (y0 > 0) { ui.fillStyle = R3D.argb(th.N).css; ui.fillRect(0, 0, W, y0); }
-    for (let x = x0; x < W; x += bgW) ui.drawImage(bg, x, y0, bgW, bgH);
-    const yBot = y0 + bgH;
-    if (yBot < H) { ui.fillStyle = R3D.argb(th.ct).css; ui.fillRect(0, yBot, W, H - yBot); }
+    if (hy === null || hy === undefined) {
+      ui.fillStyle = R3D.argb(th.ct).css; ui.fillRect(0, 0, W, H);
+    } else {
+      const y0 = Math.round(hy - 110 * BG_SCALE);
+      let x0 = Math.floor((-(this.camYaw * BG_SCROLL) % bgW + bgW * 4) % bgW) - bgW;
+      if (y0 > 0) { ui.fillStyle = R3D.argb(th.N).css; ui.fillRect(0, 0, W, y0); }
+      for (let x = x0; x < W; x += bgW) ui.drawImage(bg, x, y0, bgW, bgH);
+      const yBot = y0 + bgH;
+      if (yBot < H) { ui.fillStyle = R3D.argb(th.ct).css; ui.fillRect(0, yBot, W, H - yBot); }
+    }
 
     if (R3D.scene3d) {
       this.updateTileWindow();
@@ -691,37 +777,44 @@ const raceScene = {
   },
 
   // -------------------------------------------------- HUD
-  // Laid out like a race-timing overlay: a pause box and a small data panel
-  // in the top left, the speed box with the clock strip under it in the top
-  // right. Thin white rules, translucent grey plates, one hot magenta bar.
+  // A race-timing overlay: a pause box and a two-row data panel on the left,
+  // the speed box with the clock strip under it on the right. Both clusters
+  // start on the same line and their plates are the same height, so the
+  // overlay reads as one piece of instrumentation.
   drawHUD() {
     if (this.phase === 'prerace') return;
     const units = S().settings.units;
     const kmh = Math.round(this.speed * (units === 0 ? KMH : MPH));
+    const top = 14, plateH = 46;
 
     // ---- top left: pause box + data panel
     this.pauseButton();
-    panel(52, 14, 152, 44, { r: 2, fill: 'rgba(24,27,32,0.55)' });
+    const dx = 52, dw = 148;
+    plate(dx, top, dw, plateH, { topLine: 'rgba(255,255,255,0.10)' });
     const total = this.finishSeg || 1;
     const prog = Math.max(0, Math.min(1, (this.segHint || 0) / total));
-    tag('Dist.', 62, 19, 0, C.dim, 10, 1.2);
-    text(Math.round(prog * 100) + '%', 194, 17, 8, C.white, 14, '700', 0, true);
-    tag('Split', 62, 37, 0, C.dim, 10, 1.2);
-    text(this.splitVal || '--', 194, 35, 8, this.splitVal ? (this.splitGood ? C.green : C.red) : C.faint, 14, '700', 0, true);
+    const rowY = [top + plateH * 0.27, top + plateH * 0.75];
+    tagMid('Dist.', dx + 10, rowY[0], 0, C.dim, 10, 0.9);
+    textMid(Math.round(prog * 100) + '%', dx + dw - 10, rowY[0], 8, C.white, 15, '700', 0, true);
+    ui.fillStyle = 'rgba(255,255,255,0.09)';
+    ui.fillRect(dx + 10, top + plateH * 0.5, dw - 20, 1);
+    tagMid('Split', dx + 10, rowY[1], 0, C.dim, 10, 0.9);
+    textMid(this.splitVal || '--:--', dx + dw - 10, rowY[1], 8,
+      this.splitVal ? (this.splitGood ? C.green : C.red) : C.faint, 15, '700', 0, true);
 
     // ---- top right: speed box
-    const sx = W - 146;
-    panel(sx, 14, 130, 54, { r: 2, fill: 'rgba(24,27,32,0.55)' });
-    tag(units === 0 ? 'Km/h' : 'Mph', sx + 10, 20, 0, C.dim, 10, 1.2);
-    text(String(kmh), sx + 120, 22, 8, C.white, 34, '700', -0.5, true);
+    const sx = W - 146, sw = 130;
+    plate(sx, top, sw, plateH, { topLine: 'rgba(255,255,255,0.10)' });
+    tag(units === 0 ? 'Km/h' : 'Mph', sx + 10, top + 9, 0, C.dim, 10, 0.9);
+    textMid(String(kmh), sx + sw - 10, top + 36, 8, C.white, 32, '700', 0, true);
     // ---- the clock strip
     ui.fillStyle = C.magenta;
-    ui.fillRect(sx, 74, 130, 22);
+    ui.fillRect(sx, top + plateH + 6, sw, 21);
     ui.fillStyle = C.white;
     ui.beginPath();
-    ui.moveTo(sx + 9, 78); ui.lineTo(sx + 17, 85); ui.lineTo(sx + 9, 92);
+    ui.moveTo(sx + 9, top + plateH + 11); ui.lineTo(sx + 16, top + plateH + 16.5); ui.lineTo(sx + 9, top + plateH + 22);
     ui.closePath(); ui.fill();
-    text(this.clockText(), sx + 23, 78, 0, C.white, 14, '700', 0.4, true);
+    textMid(this.clockText(), sx + 22, top + plateH + 16.5, 0, C.white, 13, '700', 0.3, true);
 
     if (this.splitT > 0) {
       this.splitT -= 1 / 60;
@@ -758,10 +851,10 @@ const raceScene = {
 
   // the pause box, top left
   pauseButton() {
-    const x = 16, y = 14, s = 30;
-    panel(x, y, s, s, { r: 2, fill: 'rgba(24,27,32,0.55)' });
-    R3D.iconPause(x + s / 2, y + s / 2, 16, C.white);
-    tapArea('pause', x - 4, y - 4, s + 8, s + 8, () => {
+    const x = 16, y = 14, s = 28;
+    plate(x, y, s, s, { r: 2, topLine: 'rgba(255,255,255,0.10)' });
+    R3D.iconPause(x + s / 2, y + s / 2, 14, C.white);
+    tapArea('pause', x - 5, y - 5, s + 10, s + 10, () => {
       if (this.phase === 'racing' || this.phase === 'countdown') {
         this.paused = true; this.pauseSel = 0; this.pausePage = 0;
         AudioSys.stopMusic();
@@ -833,29 +926,34 @@ const raceScene = {
 
   // -------------------------------------------------- pause overlay
   drawPause() {
-    ui.fillStyle = 'rgba(4,5,7,0.72)';
+    ui.fillStyle = 'rgba(4,5,7,0.70)';
     ui.fillRect(0, 0, W, H);
     const items = this.pauseItems();
-    const cw = 320, ch = 74 + items.length * 42;
+    const cw = 330, ch = 76 + items.length * 42;
     const x = Math.round((W - cw) / 2), y = Math.round((H - ch) / 2);
-    panel(x, y, cw, ch, { r: 2, fill: 'rgba(12,14,18,0.96)' });
-    checkers(x + 16, y + 16, cw - 32, 4, 8);
-    tag(this.pausePage === 1 ? D.lang[107] : 'Paused', W / 2, y + 28, 5, C.accent, 16, 2.4);
-    let iy = y + 52;
+    plate(x, y, cw, ch, { r: 2, fill: 'rgba(10,12,16,0.94)', topLine: 'rgba(255,255,255,0.10)' });
+    tag(this.pausePage === 1 ? D.lang[107] : 'Paused', W / 2, y + 26, 5, C.accent, 15, 2.2);
+    if (this.pausePage === 1) {
+      tag('Tap a row to change it  ·  C switches camera', W / 2, y + 46, 5, C.faint, 10, 0.9);
+    }
+    let iy = y + (this.pausePage === 1 ? 62 : 52);
     items.forEach((it, i) => {
       const active = i === this.pauseSel;
-      panel(x + 16, iy, cw - 32, 34, {
+      plate(x + 16, iy, cw - 32, 34, {
         r: 2,
-        fill: active ? 'rgba(255,196,0,0.16)' : 'rgba(30,34,40,0.55)',
-        borderColor: active ? C.accent : C.lineSoft,
+        fill: active ? 'rgba(255,196,0,0.12)' : 'rgba(255,255,255,0.05)',
+        borderColor: active ? C.accent : 'rgba(255,255,255,0.12)',
         lw: active ? 2 : 1,
       });
-      tag(it.label, x + 32, iy + 10, 0, C.white, 14, 1.2);
-      if (it.right) tag(it.right, x + cw - 32, iy + 10, 8, C.accent2, 13, 1.2);
+      if (active) { ui.fillStyle = C.accent; ui.fillRect(x + 16, iy, 3, 34); }
+      tag(it.label, x + 32, iy + 11, 0, active ? C.accent : C.text, 13, 0.9);
+      if (it.right) tag(it.right, x + cw - 32, iy + 11, 8, C.accent2, 12, 0.9);
       tapArea('p' + i, x + 16, iy, cw - 32, 34, () => { this.pauseSel = i; this.pausePick(i); });
       iy += 42;
     });
-    tag('Tap a row  ·  ESC to resume', W / 2, y + ch - 22, 5, C.faint, 11, 1.2);
+    if (this.pausePage !== 1) {
+      tag('Tap a row  ·  ESC to resume  ·  C for camera', W / 2, y + ch - 20, 5, C.faint, 10, 0.9);
+    }
   },
 };
 

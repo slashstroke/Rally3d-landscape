@@ -77,13 +77,11 @@ const C = R3D.colors = {
 };
 
 const FONT = '"Segoe UI", system-ui, -apple-system, Roboto, "Helvetica Neue", Arial, sans-serif';
-const NUMF = '"Arial Narrow", "Helvetica Neue", Arial, sans-serif';
 R3D.FONT = FONT;
-R3D.NUMF = NUMF;
 
 // ------------------------------------------------------------------ drawing helpers
-function setFont(size, weight, spacing, num) {
-  ui.font = (weight || '700') + ' ' + size + 'px ' + (num ? NUMF : FONT);
+function setFont(size, weight, spacing) {
+  ui.font = (weight || '700') + ' ' + size + 'px ' + FONT;
   if ('letterSpacing' in ui) ui.letterSpacing = (spacing || 0) + 'px';
 }
 
@@ -99,41 +97,80 @@ function roundRect(x, y, w, h, r) {
 }
 R3D.roundRect = roundRect;
 
-function panel(x, y, w, h, opt) {
+// A plate is a piece of glass laid over the scene: a soft vertical gradient
+// with a hairline edge. Everything in the interface is built from these.
+function plate(x, y, w, h, opt) {
   opt = opt || {};
   roundRect(x, y, w, h, opt.r === undefined ? 2 : opt.r);
-  ui.fillStyle = opt.fill || C.panel;
+  if (opt.fill) {
+    ui.fillStyle = opt.fill;
+  } else {
+    const g = ui.createLinearGradient(0, y, 0, y + h);
+    g.addColorStop(0, opt.top || 'rgba(232,238,246,0.17)');
+    g.addColorStop(0.5, opt.mid || 'rgba(150,162,178,0.11)');
+    g.addColorStop(1, opt.bottom || 'rgba(90,102,118,0.09)');
+    ui.fillStyle = g;
+  }
   ui.fill();
   if (opt.border !== false) {
-    ui.strokeStyle = opt.borderColor || C.line;
+    ui.strokeStyle = opt.borderColor || 'rgba(255,255,255,0.22)';
     ui.lineWidth = opt.lw || 1;
     ui.stroke();
   }
+  if (opt.topLine) {
+    ui.fillStyle = opt.topLine;
+    ui.fillRect(x + 1, y, w - 2, 1);
+  }
 }
-R3D.panel = panel;
+R3D.plate = plate;
+R3D.panel = plate;
 
-// text: str, x, y, align(0 left|5 center|8 right), color, size, weight, spacing, numeric
-function text(str, x, y, align, color, size, weight, spacing, num) {
-  setFont(size || 16, weight, spacing, num);
+// text: str, x, y, align(0 left|5 center|8 right), color, size, weight, spacing, num
+// `num` draws the string condensed (a horizontal squeeze), which is what gives
+// the timing readouts their instrument-panel look on any platform.
+function drawText(str, x, y, align, color, size, weight, spacing, num, mid) {
+  setFont(size || 16, weight, spacing);
   ui.textAlign = align === 8 ? 'right' : (align === 5 ? 'center' : 'left');
-  ui.textBaseline = 'top';
+  ui.textBaseline = mid ? 'middle' : 'top';
+  ui.save();
+  if (num) {
+    ui.translate(x, y);
+    ui.scale(0.88, 1);
+    ui.translate(-x, -y);
+  }
   if (color !== 'transparent') {
-    ui.fillStyle = 'rgba(0,0,0,0.45)';
+    ui.fillStyle = 'rgba(0,0,0,0.5)';
     ui.fillText(str, x + 1, y + 1);
   }
   ui.fillStyle = color || C.text;
   ui.fillText(str, x, y);
+  ui.restore();
+}
+function text(str, x, y, align, color, size, weight, spacing, num) {
+  drawText(str, x, y, align, color, size, weight, spacing, num, false);
 }
 R3D.text = text;
 
-// small uppercase technical label, the workhorse of the new HUD
+// vertically centred on y - the row heights then line up by construction
+function textMid(str, x, y, align, color, size, weight, spacing, num) {
+  drawText(str, x, y, align, color, size, weight, spacing, num, true);
+}
+R3D.textMid = textMid;
+
+// small uppercase technical label, the workhorse of the HUD
 function tag(str, x, y, align, color, size, spacing) {
-  text(String(str).toUpperCase(), x, y, align, color || C.dim, size || 11, '700', spacing === undefined ? 1.1 : spacing);
+  text(String(str).toUpperCase(), x, y, align, color || C.dim, size || 10, '700', spacing === undefined ? 0.9 : spacing);
 }
 R3D.tag = tag;
 
-function measure(str, size, weight, spacing, num) {
-  setFont(size || 16, weight, spacing, num);
+// the same, vertically centred
+function tagMid(str, x, y, align, color, size, spacing) {
+  drawText(String(str).toUpperCase(), x, y, align, color || C.dim, size || 10, '700', spacing === undefined ? 0.9 : spacing, false, true);
+}
+R3D.tagMid = tagMid;
+
+function measure(str, size, weight, spacing) {
+  setFont(size || 16, weight, spacing);
   return ui.measureText(str).width;
 }
 R3D.measure = measure;
@@ -259,6 +296,7 @@ const KEYMAP = {
   Enter: 'OK', Space: 'OK', NumpadEnter: 'OK',
   Escape: 'BACK', Backspace: 'BACK',
   KeyP: 'PAUSE',
+  KeyC: 'CAM',
 };
 const DRIVE = { LEFT: 'L', RIGHT: 'R', UP: 'U', DOWN: 'D' };
 
@@ -358,6 +396,7 @@ R3D.isHeld = (id) => holdCount[id] > 0;
 uiCanvas.addEventListener('pointerdown', (e) => {
   e.preventDefault();
   AudioSys.ensure();
+  if (R3D.isTransitioning && R3D.isTransitioning()) return;   // ignore taps mid-change
   const p = localPoint(e);
   for (let i = hit.holds.length - 1; i >= 0; i--) {
     const a = hit.holds[i];
@@ -462,7 +501,7 @@ function defSave() {
     cars: [0, 1, 1, 1],
     names, scores,
     champ: 0,
-    settings: { sound: 2, units: 0, auto: 0, titleSong: 0, tilt: 0, buttons: 1 },
+    settings: { sound: 2, units: 0, auto: 0, titleSong: 0, tilt: 0, buttons: 1, camera: 'chase' },
     name: D.lang[68],
   };
 }
@@ -657,14 +696,16 @@ let last = 0;
 let clock = 0;
 
 function applyScene(s) {
+  if (!s) return;
   scene = s;
   R3D.clearPressed();
   if (s.enter) s.enter();
 }
 
-// Screen change: a hard vertical wipe instead of a soft cross-fade. The bar
-// sweeps in, the screen swaps at full cover, then the bar sweeps off again -
-// 100 ms each way, so it reads as a switch, not a dissolve.
+// Screen change: a shutter closes over the scene, the screen swaps at full
+// cover and the shutter opens again. The scene itself drifts a few pixels
+// while it happens, so the change reads as a move rather than a cut - and it
+// is slow enough (180 ms in, 220 ms out) to follow.
 R3D.setScene = function (s) {
   if (pending) return;
   pending = s;
@@ -672,26 +713,34 @@ R3D.setScene = function (s) {
   trans.t = 0;
 };
 R3D.currentScene = () => scene;
+R3D.isTransitioning = () => trans.dir !== 0;
 
+// the original's menus keep the title music looping; restart it whenever
+// nothing is playing
 R3D.ensureMenuMusic = function () {
   const A = R3D.audio;
   if (!A.music && !A._starting && save.settings.sound !== 0) A.play('title', true, 0.5);
 };
 
-// the wipe bar: near-black with a hot leading edge and a short accent trail
-function drawWipe(p) {
-  const e = p < 0.5 ? 4 * p * p * p : 1 - Math.pow(-2 * p + 2, 3) / 2;   // ease in-out
-  const x = e * (W + 90) - 90;
+function ease(t) {
+  return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+}
+
+// the shutter: near-black, a soft warm trail and a hot leading edge
+function drawCover(p) {
+  const x = p * (W + 120) - 120;
+  if (x <= 0) return;
   ui.fillStyle = C.ink;
-  ui.fillRect(0, 0, Math.max(0, x), H);
+  ui.fillRect(0, 0, x, H);
   if (x > 0) {
-    const g = ui.createLinearGradient(x - 46, 0, x, 0);
+    const g = ui.createLinearGradient(x - 110, 0, x, 0);
     g.addColorStop(0, 'rgba(255,196,0,0)');
-    g.addColorStop(1, 'rgba(255,196,0,0.30)');
+    g.addColorStop(0.75, 'rgba(255,196,0,0.10)');
+    g.addColorStop(1, 'rgba(255,196,0,0.26)');
     ui.fillStyle = g;
-    ui.fillRect(x - 46, 0, 46, H);
+    ui.fillRect(x - 110, 0, 110, H);
     ui.fillStyle = C.accent;
-    ui.fillRect(x - 3, 0, 3, H);
+    ui.fillRect(x - 2, 0, 2, H);
   }
 }
 
@@ -731,28 +780,35 @@ R3D._loop = function () {
     R3D.pollInput();
     ui.setTransform(physScale, 0, 0, physScale, 0, 0);
 
+    let dx = 0, cover = -1;
     if (trans.dir === 1) {
-      trans.t = Math.min(1, trans.t + dt / 0.10);
-      if (scene) { R3D.clearHits(); scene.update(dt); scene.draw(); }
-      drawWipe(trans.t);
+      trans.t = Math.min(1, trans.t + dt / 0.18);
+      const e = ease(trans.t);
+      dx = -12 * e;
+      cover = e;
       if (trans.t >= 1) {
         const nx = pending; pending = null;
-        applyScene(nx);
-        trans.t = 0; trans.dir = -1;
+        trans.t = 1; trans.dir = -1;      // move on before applying, so a
+        applyScene(nx);                   // throwing enter() cannot wedge it
       }
     } else if (trans.dir === -1) {
-      trans.t = Math.min(1, trans.t + dt / 0.12);
-      if (scene) { R3D.clearHits(); scene.update(dt); scene.draw(); }
-      drawWipe(1 - trans.t);
-      if (trans.t >= 1) trans.dir = 0;
-    } else {
-      if (scene) {
-        if (scene.menuMusic && !(scene.musicT > 0)) R3D.ensureMenuMusic();
-        R3D.clearHits();
-        scene.update(dt);
-        scene.draw();
-      }
+      trans.t = Math.max(0, trans.t - dt / 0.22);
+      const e = ease(trans.t);
+      dx = 12 * e;
+      cover = e;
+      if (trans.t <= 0) trans.dir = 0;
     }
+
+    if (scene) {
+      if (trans.dir === 0 && scene.menuMusic && !(scene.musicT > 0)) R3D.ensureMenuMusic();
+      R3D.clearHits();
+      scene.update(dt);
+      ui.save();
+      if (dx) ui.translate(dx, 0);
+      scene.draw();
+      ui.restore();
+    }
+    if (cover >= 0) drawCover(cover);
     drawToasts(dt);
     dragState.dx = 0;      // drag deltas are per frame
     R3D.clearPressed();
@@ -760,20 +816,41 @@ R3D._loop = function () {
 };
 
 // ------------------------------------------------------------------ misc helpers
-// A plain, slightly lit backdrop - the panels are supposed to be the thing
-// that carries the interface, so the background stays quiet.
-R3D.drawBackground = function () {
-  const g = ui.createLinearGradient(0, 0, 0, H);
-  g.addColorStop(0, '#1b1f26');
-  g.addColorStop(0.55, '#111419');
-  g.addColorStop(1, '#08090b');
-  ui.fillStyle = g;
-  ui.fillRect(0, 0, W, H);
-  // a soft pool of light behind the content
-  const v = ui.createRadialGradient(W * 0.42, H * 0.42, 20, W * 0.42, H * 0.42, W * 0.75);
+// The menus sit over the game's own scenery - the background art of the
+// season the selected track belongs to - pushed far back and darkened, so the
+// interface has a place to live instead of floating on a flat gradient.
+R3D.uiTheme = function () {
+  const t = (R3D.game && R3D.game.trackIdx) || 0;
+  const tr = D.tracks[t];
+  return (tr && tr.theme) || 'summer';
+};
+
+R3D.drawBackground = function (theme) {
+  const img = theme && R3D._bgImg ? R3D._bgImg[theme] : null;
+  if (img && img.complete && img.width) {
+    const s = Math.max(W / img.width, H / img.height);
+    const w = img.width * s, h = img.height * s;
+    ui.drawImage(img, (W - w) / 2, (H - h) / 2, w, h);
+    ui.fillStyle = 'rgba(8,9,11,0.74)';
+    ui.fillRect(0, 0, W, H);
+  } else {
+    const g = ui.createLinearGradient(0, 0, 0, H);
+    g.addColorStop(0, '#1b1f26');
+    g.addColorStop(0.55, '#111419');
+    g.addColorStop(1, '#08090b');
+    ui.fillStyle = g;
+    ui.fillRect(0, 0, W, H);
+  }
+  // a pool of light behind the content, then a vignette to the corners
+  const v = ui.createRadialGradient(W * 0.45, H * 0.45, 20, W * 0.45, H * 0.45, W * 0.72);
   v.addColorStop(0, 'rgba(150,170,200,0.10)');
   v.addColorStop(1, 'rgba(0,0,0,0)');
   ui.fillStyle = v;
+  ui.fillRect(0, 0, W, H);
+  const vg = ui.createRadialGradient(W / 2, H / 2, H * 0.30, W / 2, H / 2, W * 0.78);
+  vg.addColorStop(0, 'rgba(0,0,0,0)');
+  vg.addColorStop(1, 'rgba(0,0,0,0.5)');
+  ui.fillStyle = vg;
   ui.fillRect(0, 0, W, H);
 };
 

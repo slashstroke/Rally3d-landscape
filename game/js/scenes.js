@@ -28,8 +28,9 @@ const COL_X = 356, COL_W = 262;  // right-hand menu column
 const ROW_H = 44, ROW_GAP = 10;
 const SHOP_W = 386;              // 3D showroom panel width (car select)
 
-const PLATE = 'rgba(28,32,38,0.62)';
-const PLATE_SOFT = 'rgba(24,27,32,0.45)';
+// null = let plate() use its glass gradient
+const PLATE = null;
+const PLATE_SOFT = null;
 
 function header(title, opts) {
   opts = opts || {};
@@ -76,23 +77,24 @@ function bigButton(id, x, y, w, h, label, onTap, opts) {
   const active = !!opts.active;
   panel(x, y, w, h, {
     r: 2,
-    fill: active ? 'rgba(255,196,0,0.15)' : (opts.fill || PLATE),
-    borderColor: active ? C.accent : (opts.border || C.lineSoft),
+    fill: active ? 'rgba(255,196,0,0.10)' : (opts.fill || PLATE),
+    borderColor: active ? C.accent : (opts.border || 'rgba(255,255,255,0.14)'),
     lw: active ? 2 : 1,
   });
   if (active) {
     ui.fillStyle = C.accent;
     ui.fillRect(x, y, 3, h);
   }
-  const fs = opts.size || 15;
-  const ty = y + (h - fs) / 2 - 2;
+  const fs = opts.size || 14;
+  const ty = y + (h - fs) / 2 - 1;
   if (opts.upper === false) {
     text(label, x + (opts.center ? w / 2 : 18), ty, opts.center ? 5 : 0, opts.color || C.white, fs, '700', 0, true);
   } else {
-    tag(label, x + (opts.center ? w / 2 : 18), ty, opts.center ? 5 : 0, opts.color || C.white, fs, 1.4);
+    tag(label, x + (opts.center ? w / 2 : 18), ty, opts.center ? 5 : 0,
+      opts.color || (active ? C.accent : C.text), fs, 0.9);
   }
   if (opts.right) {
-    tag(opts.right, x + w - 18, ty, 8, opts.rightColor || C.accent2, opts.rightSize || 13, 1.2);
+    tag(opts.right, x + w - 18, ty, 8, opts.rightColor || C.accent2, opts.rightSize || 12, 0.9);
   }
   // press feedback - the row flashes for a fraction of a second
   const fl = R3D.flashFor(id);
@@ -170,7 +172,7 @@ const titleScene = {
     if (wasPressed('OK')) this.pick(this.sel);
   },
   draw() {
-    R3D.drawBackground();
+    R3D.drawBackground(R3D.uiTheme());
     poster(0, 0, 268, 358);
     const g = ui.createLinearGradient(150, 0, 266, 0);
     g.addColorStop(0, 'rgba(8,9,11,0)');
@@ -211,7 +213,7 @@ const newGameScene = {
     if (wasPressed('OK')) this.pick(this.sel);
   },
   draw() {
-    R3D.drawBackground();
+    R3D.drawBackground(R3D.uiTheme());
     header(D.lang[100], { back: 'title' });
     logo(30, 92, 240);
     tag('Choose a mode', 30, 150, 0, C.dim, 12, 2);
@@ -235,7 +237,7 @@ const nextRaceScene = {
     }
   },
   draw() {
-    R3D.drawBackground();
+    R3D.drawBackground(R3D.uiTheme());
     header(D.lang[17], { back: () => R3D.setScene(newGameScene) });
     const idx = S().champ % 12;
     const tr = D.tracks[idx];
@@ -280,7 +282,7 @@ const trackSelectScene = {
     if (wasPressed('OK')) this.pick(this.sel);
   },
   draw() {
-    R3D.drawBackground();
+    R3D.drawBackground(R3D.uiTheme());
     header(D.lang[58], { back: () => R3D.setScene(R3D.game.mode === 'champ' ? nextRaceScene : newGameScene) });
     const cols = 4, cw = 142, ch = 74, gx = 14, gy = 12;
     const gridW = cols * cw + (cols - 1) * gx;
@@ -292,8 +294,8 @@ const trackSelectScene = {
       const active = i === this.sel;
       panel(cx, cy, cw, ch, {
         r: 2,
-        fill: active ? 'rgba(255,196,0,0.13)' : PLATE_SOFT,
-        borderColor: active ? C.accent : C.lineSoft,
+        fill: active ? 'rgba(255,196,0,0.10)' : PLATE_SOFT,
+        borderColor: active ? C.accent : 'rgba(255,255,255,0.14)',
         lw: active ? 2 : 1,
       });
       if (active) { ui.fillStyle = C.accent; ui.fillRect(cx, cy, 3, ch); }
@@ -383,7 +385,7 @@ const carSelectScene = {
     this.confirmT = 0.5;
   },
   draw() {
-    R3D.drawBackground();
+    R3D.drawBackground(R3D.uiTheme());
     if (R3D.scene3d) {
       // the showroom renders into the left panel only; the GL canvas is
       // composited over the UI canvas (the 3D layer sits UNDER the UI layer)
@@ -401,7 +403,7 @@ const carSelectScene = {
     const car = D.cars[this.sel];
     const locked = S().cars[this.sel] === 1;
     // the selected car's card sits under the showroom, clear of the model
-    panel(16, 212, 252, 130, { r: 2, fill: 'rgba(12,14,18,0.92)' });
+    panel(16, 212, 252, 130, { r: 2, fill: 'rgba(10,12,16,0.90)', topLine: 'rgba(255,255,255,0.12)' });
     text(car.name, 30, 224, 0, locked ? C.faint : C.white, 19, '700', 0, true);
     if (locked) {
       tag(D.lang[9], 30, 256, 0, C.accent, 12, 1.6);
@@ -430,9 +432,9 @@ const carSelectScene = {
     menuColumn(items, (i) => { this.sel = i; this.swap(); }, { x: COL_X, y: 74, h: 38, gap: 6, sel: this.sel });
     if (!locked) {
       bigButton('race', COL_X, 246, COL_W, 56, 'Race!', () => this.start(), {
-        active: true, center: true, size: 20, fill: 'rgba(255,196,0,0.15)', border: C.accent,
+        active: true, center: true, size: 20, color: C.white, fill: 'rgba(255,196,0,0.12)', border: C.accent,
       });
-      tag('Drag the car to spin it', COL_X, 312, 0, C.faint, 11, 1.4);
+      tag('Drag the car to spin it', COL_X, 312, 0, C.faint, 11, 1.2);
     }
   },
 };
@@ -449,7 +451,7 @@ const hiScoreScene = {
     if (wasPressed('OK')) R3D.setScene(titleScene);
   },
   draw() {
-    R3D.drawBackground();
+    R3D.drawBackground(R3D.uiTheme());
     header(D.lang[96], { back: 'title' });
     const sv = S();
     panel(PAD, 82, 300, 194, { r: 2, fill: PLATE_SOFT });
@@ -469,8 +471,8 @@ const hiScoreScene = {
       const active = i === this.sel;
       panel(cx, cy, cw, ch, {
         r: 2,
-        fill: active ? 'rgba(255,196,0,0.13)' : PLATE_SOFT,
-        borderColor: active ? C.accent : C.lineSoft,
+        fill: active ? 'rgba(255,196,0,0.10)' : PLATE_SOFT,
+        borderColor: active ? C.accent : 'rgba(255,255,255,0.14)',
         lw: active ? 2 : 1,
       });
       if (active) { ui.fillStyle = C.accent; ui.fillRect(cx, cy, 3, ch); }
@@ -530,7 +532,7 @@ const settingsScene = {
     if (wasPressed('OK')) this.pick(this.sel);
   },
   draw() {
-    R3D.drawBackground();
+    R3D.drawBackground(R3D.uiTheme());
     header(D.lang[107], { back: 'title' });
     const items = this.items().map((it) => ({ label: it.label, right: it.right }));
     menuColumn(items, (i) => { this.sel = i; this.pick(i); }, { sel: this.sel, y: 72, h: 34, gap: 6 });
@@ -565,7 +567,7 @@ const instructionsScene = {
     if (wasPressed('OK')) R3D.setScene(titleScene);
   },
   draw() {
-    R3D.drawBackground();
+    R3D.drawBackground(R3D.uiTheme());
     header(D.lang[99], { back: 'title' });
     panel(PAD, 82, W - PAD * 2, 202, { r: 2, fill: PLATE_SOFT });
     const body = this.fix(this.pages()[this.page]);
@@ -606,7 +608,7 @@ const resultsScene = {
     else R3D.setScene(trackSelectScene);
   },
   draw() {
-    R3D.drawBackground();
+    R3D.drawBackground(R3D.uiTheme());
     const g = R3D.game.results || { headline: '', time: 0 };
     const cw = 380, ch = 244;
     const x = Math.round((W - cw) / 2), y = Math.round((H - ch) / 2) + 4;

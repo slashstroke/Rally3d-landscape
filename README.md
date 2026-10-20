@@ -6,7 +6,7 @@ sprite sheets, MIDI music, track data, UI text, medal times and unlock rules.
 No Java, no emulation — JavaScript + Three.js, rebuilt for a 16:9 phone screen
 with modern, thumb-friendly controls.
 
-![The race HUD](docs/screenshots/final_race_steering.png)
+![The race HUD](docs/screenshots/final_race_hud.png)
 
 Everything in this folder is self-contained: the game, its assets and the
 server it runs on.
@@ -47,7 +47,7 @@ Everything is done with **tap targets** — no soft keys, no keyboard.
 | bottom left | ◀ ▶ | Steer (press and hold, slide between them) |
 | bottom right | ▲ GAS | Accelerate (press and hold) |
 | bottom right | ▼ BRAKE | Brake |
-| top right | ⏸ | Pause menu |
+| top left | ‖ | Pause menu |
 | menus | tap a row | Select / change a setting |
 | menus | ◀ ▶ on the page | Previous / next page |
 
@@ -59,8 +59,26 @@ angle is calibrated the moment you enable it, so hold the phone the way you
 like to drive and it becomes straight. On iOS the browser asks for the motion
 permission on that tap. Tilt and the on-screen pads can be used together.
 
-The steering pads can be hidden entirely (Settings → *On-screen buttons* →
-off) if you drive with tilt only.
+The touch controls can be hidden entirely — from the pause menu
+(‖ → *Settings* → *Touch controls*) or from the main Settings menu. Hide them
+when you drive with tilt only, or when you want the screen clear for the
+scenery.
+
+## Cameras
+
+Five viewpoints, switched with the **C** key (during a race or from the pause
+menu) or from *Pause → Settings → Camera*. The choice is remembered.
+
+| Camera | What you see |
+|--------|--------------|
+| **Chase** | The default: behind and above the car, with the original's trailing yaw so the car leads the camera into a corner. |
+| **Hood** | From the bonnet, just above the bonnet line, looking down the road. |
+| **Bumper** | At the very front of the car, bumper height. The fastest, most committed view. |
+| **Top down** | Straight down over the car — the rally driver's view of a corner entry. |
+| **Cinematic** | A low camera that drifts around the car while you drive. |
+
+The background scenery is pinned to the horizon of whichever camera is
+active, so the sky and the distant hills always line up.
 
 Keyboard still works for desktop testing: arrows / WASD, Enter = OK,
 Esc = back, P = pause.
@@ -76,12 +94,16 @@ Esc = back, P = pause.
   box in the top right with the clock on a magenta strip underneath. The menus
   follow the same language: a slim checkered rule under the header, menu rows
   as ruled plates, the track list as a 4x3 grid of track cards with medal cups
-  and padlocks.
+  and padlocks, and the game's own scenery pushed back behind them.
 - **Touch-first input**: press-and-hold pads, tap-to-confirm, multi-touch, and
   a portrait "rotate your device" hint on phones. Every tap answers with a
   short flash so the screen never feels dead.
-- **Crisp screen changes**: a hard vertical wipe with a hot amber edge (100 ms
-  out, 120 ms in) instead of the portrait build's sliding checkered banner.
+- **Five cameras** — chase, hood, bumper, top-down and cinematic — switched
+  with the C key or from the pause menu.
+- **Screen changes**: a shutter closes over the scene, the screen swaps at
+  full cover and the shutter opens again, while the scene itself drifts a few
+  pixels. 180 ms in, 220 ms out — enough to follow, quick enough to feel
+  like a switch.
 - **Camera**: re-framed for the wide screen — the same 60 degree vertical lens
   and the original's 9-unit chase distance keep the world at exactly the
   original's pixel scale, so the track reads the same, only wider. The camera
