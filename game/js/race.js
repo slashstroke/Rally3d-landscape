@@ -255,7 +255,6 @@ const raceScene = {
         { label: 'Motion blur', right: st.motionBlur === 0 ? 'off' : 'on' },
         { label: 'Lighting', right: st.lighting === 0 ? 'off' : 'on' },
         { label: 'Shadows', right: st.shadows === 0 ? 'off' : 'on' },
-        { label: 'Camera shake', right: st.shake === 0 ? 'off' : 'on' },
         { label: 'Auto acceleration', right: st.auto === 1 ? 'on' : 'off' },
         { label: 'Speed units', right: [D.lang[66], D.lang[67]][st.units] },
       ];
@@ -275,8 +274,7 @@ const raceScene = {
       else if (i === 2) st.motionBlur = (st.motionBlur + 1) % 2;
       else if (i === 3) st.lighting = (st.lighting + 1) % 2;
       else if (i === 4) st.shadows = (st.shadows + 1) % 2;
-      else if (i === 5) st.shake = (st.shake + 1) % 2;
-      else if (i === 6) st.auto = (st.auto + 1) % 2;
+      else if (i === 5) st.auto = (st.auto + 1) % 2;
       else st.units = (st.units + 1) % 2;
       R3D.persist();
       if (i >= 2 && i <= 4) this.rebuildGraphics();
@@ -699,7 +697,6 @@ const raceScene = {
       const l = toWorld(look[0], look[1], look[2]);
       camera.lookAt(l.x, l.y, l.z);
     }
-    this.applyShake(dt);
     this.setHorizonFromLook();
     this.placeCar();
   },
@@ -721,55 +718,6 @@ const raceScene = {
       (180 - this.yaw) * Math.PI / 180,
       this.roll * Math.PI / 180
     );
-  },
-
-  // -------------------------------------------------- camera shake
-  // How much the camera should rattle: the faster you go and the more the
-  // suspension is working, the more. The bumpiness comes from how fast the
-  // car's attitude is changing - a steady slope gives a constant roll, which
-  // should not shake the camera at all. Kept deliberately small: it is there
-  // to make the speed felt, not to make the screen hard to read.
-  shakeAmount() {
-    const top = TOPS[R3D.game.carIdx] / 10;
-    const speedK = Math.max(0, Math.min(1, this.speed / top));
-    const dRoll = this.prevRoll === undefined ? 0 : Math.abs(this.roll - this.prevRoll);
-    const dPitch = this.prevPitch === undefined ? 0 : Math.abs(this.pitch - this.prevPitch);
-    const dY = this.prevY === undefined ? 0 : Math.abs(this.pos.y - this.prevY);
-    // how much the suspension is working: the car changing attitude and
-    // bouncing over the road
-    const rough = Math.max(0, Math.min(1, (dRoll + dPitch) * 4 + dY * 6));
-    // speed always gives a little rattle, rough ground gives a lot more
-    return speedK * speedK * (0.45 + rough * 0.55);
-  },
-
-  // The shake moves the WHOLE frame - the scenery, the car and the HUD
-  // together - not the camera. Shaking the camera instead would slide the
-  // car against a still background and the HUD, which reads as the car
-  // shaking rather than the view.
-  applyShake(dt) {
-    // the on-car cameras are bolted to the body, so they rattle far less
-    const scale = this.camMode === 'hood' || this.camMode === 'bumper' ? 0.4 : 1;
-    // in screen pixels - a couple of pixels is a rattle, more than that is a
-    // wobble
-    if (S().settings.shake === 0) { this.shakeX = 0; this.shakeY = 0; return; }
-    const amt = this.shakeAmount() * 1.1 * scale;
-    let ox = 0, oy = 0;
-    if (amt >= 0.02) {
-      this.shakeT = (this.shakeT || 0) + dt * (14 + 16 * Math.min(1, this.speed / 4));
-      const t = this.shakeT;
-      // a couple of out-of-step waves read as a rattle, not as a wobble
-      const sx = Math.sin(t * 1.9) * 0.6 + Math.sin(t * 4.3 + 1.1) * 0.4;
-      const sy = Math.sin(t * 2.6 + 0.7) * 0.5 + Math.sin(t * 5.7) * 0.5;
-      ox = sx * amt;
-      oy = sy * amt;
-    }
-    this.shakeX = ox;
-    this.shakeY = oy;
-    // remember where the car was, so the next frame can see how much the
-    // suspension moved
-    this.prevRoll = this.roll;
-    this.prevPitch = this.pitch;
-    this.prevY = this.pos.y;
   },
 
   // the contact shadow follows the car and fades as it leaves the ground
@@ -831,21 +779,16 @@ const raceScene = {
     // the background art is pinned to the horizon of whichever camera is
     // active; looking straight down there is no horizon, so it is skipped
     const hy = this.horizon;
-    // the whole frame - scenery, car and HUD - is nudged together, so the
-    // shake reads as the view rattling rather than the car moving
-    const sx = this.shakeX || 0, sy = this.shakeY || 0;
-    ui.save();
-    ui.translate(sx, sy);
-    ui.fillStyle = '#000'; ui.fillRect(-6, -6, W + 12, H + 12);
+    ui.fillStyle = '#000'; ui.fillRect(0, 0, W, H);
     if (hy === null || hy === undefined) {
-      ui.fillStyle = R3D.argb(th.ct).css; ui.fillRect(-6, -6, W + 12, H + 12);
+      ui.fillStyle = R3D.argb(th.ct).css; ui.fillRect(0, 0, W, H);
     } else {
       const y0 = Math.round(hy - 110 * BG_SCALE);
       let x0 = Math.floor((-(this.camYaw * BG_SCROLL) % bgW + bgW * 4) % bgW) - bgW;
-      if (y0 > 0) { ui.fillStyle = R3D.argb(th.N).css; ui.fillRect(-6, -6, W + 12, y0 + 6); }
-      for (let x = x0 - 6; x < W + 6; x += bgW) ui.drawImage(bg, x, y0, bgW, bgH);
+      if (y0 > 0) { ui.fillStyle = R3D.argb(th.N).css; ui.fillRect(0, 0, W, y0); }
+      for (let x = x0; x < W; x += bgW) ui.drawImage(bg, x, y0, bgW, bgH);
       const yBot = y0 + bgH;
-      if (yBot < H) { ui.fillStyle = R3D.argb(th.ct).css; ui.fillRect(-6, yBot, W + 12, H - yBot + 6); }
+      if (yBot < H) { ui.fillStyle = R3D.argb(th.ct).css; ui.fillRect(0, yBot, W, H - yBot); }
     }
 
     if (R3D.scene3d) {
@@ -860,7 +803,6 @@ const raceScene = {
     if (!this.paused && this.phase !== 'prerace' && this.phase !== 'done') this.drawControls();
     if (this.paused) this.drawPause();
     if (this.phase === 'prerace') this.drawPreRace();
-    ui.restore();
   },
 
   // -------------------------------------------------- the AI opponent

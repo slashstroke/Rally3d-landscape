@@ -478,7 +478,6 @@ const settingsScene = {
       { label: 'Motion blur', right: st.motionBlur === 0 ? 'off' : 'on' },
       { label: 'Lighting', right: st.lighting === 0 ? 'off' : 'on' },
       { label: 'Shadows', right: st.shadows === 0 ? 'off' : 'on' },
-      { label: 'Camera shake', right: st.shake === 0 ? 'off' : 'on' },
     ];
   },
   pick(i) {
@@ -486,8 +485,7 @@ const settingsScene = {
     if (this.page === 1) {
       if (i === 0) st.motionBlur = (st.motionBlur + 1) % 2;
       else if (i === 1) st.lighting = (st.lighting + 1) % 2;
-      else if (i === 2) st.shadows = (st.shadows + 1) % 2;
-      else st.shake = (st.shake + 1) % 2;
+      else st.shadows = (st.shadows + 1) % 2;
       R3D.persist();
       if (R3D.raceScene && R3D.raceScene.rebuildGraphics) R3D.raceScene.rebuildGraphics();
       return;
@@ -537,8 +535,6 @@ const settingsScene = {
         '',
         'Lighting puts a sun on the hills and',
         'the car. Shadows drop it onto the road.',
-        '',
-        'Camera shake rattles the whole frame.',
       ];
       tips.forEach((t, i) => text(t, PAD + 18, 126 + i * 21, 0, C.dim, 12, '500'));
       return;

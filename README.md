@@ -86,13 +86,12 @@ Settings → *Graphics*, or the same three rows in the in-race pause menu.
 | Option | What it does |
 |--------|--------------|
 | **Motion blur** | A radial blur that grows with your speed. Only the far edges of the screen smear — the car and the road ahead stay sharp, so it reads as speed rather than as a smudge. |
-| **Camera shake** | The whole frame — scenery, car and HUD together — rattles by a pixel or two, more at speed and rougher where the suspension is working. Because everything moves together it never reads as the car wobbling on its own. Can be switched off entirely. |
 | **Lighting** | Puts a sun on the track: the slopes that face the light are brighter, the ones turned away are darker, and the car picks up the same light. |
 | **Shadows** | A real shadow map. The car casts a shadow onto the road that moves with it; the shadow box follows the car, so the map only ever has to cover the road around you. |
 
 The background panoramas are mirrored into a double-width strip so they tile
-without a seam — a hard vertical line that moves with the camera is very
-noticeable, and it was what made the view look broken.
+without a seam — the art does not wrap, and a hard vertical line every tile
+across the screen is very noticeable.
 
 Changing a setting rebuilds what it affects on the spot — no restart, and the
 race carries on.

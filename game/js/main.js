@@ -580,7 +580,7 @@ function defSave() {
     names, scores,
     champ: 0,
     settings: { sound: 2, units: 0, auto: 0, titleSong: 0, tilt: 0, buttons: 1, camera: 'chase',
-                motionBlur: 1, lighting: 1, shadows: 1, shake: 1 },
+                motionBlur: 1, lighting: 1, shadows: 1 },
     name: D.lang[68],
   };
 }
