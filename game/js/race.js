@@ -33,21 +33,25 @@ const textMid = R3D.textMid, tagMid = R3D.tagMid;
 //   look - what it points at
 //   lag  - how fast the camera frame follows the car's yaw (the original
 //          chase cam trails noticeably; the rigid ones barely lag at all)
+// The car's own model is 5.45 long (nose at z = 2.73), 2.65 wide and 2.02
+// tall, so the on-car cameras have to sit clear of the bodywork: the hood
+// camera rides just above the bonnet line, the bumper camera just ahead of
+// the nose.
 const CAMS = {
   chase: {
-    label: 'Chase', off: [0, 3.2, -9.0], look: [0, 1.4, 8], lag: 25 / 6, pitch: 7.5,
+    label: 'Chase', off: [0, 3.2, -9.0], look: [0, 1.4, 8], lag: 25 / 6,
   },
   hood: {
-    label: 'Hood', off: [0, 1.18, 1.55], look: [0, 0.95, 18], lag: 25 / 2.6, pitch: 0,
+    label: 'Hood', off: [0, 1.42, 1.55], look: [0, 0.95, 20], lag: 25 / 2.6,
   },
   bumper: {
-    label: 'Bumper', off: [0, 0.52, 2.30], look: [0, 0.62, 20], lag: 25 / 2.6, pitch: 0,
+    label: 'Bumper', off: [0, 0.52, 3.15], look: [0, 0.30, 24], lag: 25 / 2.6,
   },
   top: {
-    label: 'Top down', off: [0, 12.5, -0.6], look: [0, 0, 0], lag: 25 / 2, pitch: 0,
+    label: 'Top down', off: [0, 11.5, 0.2], look: [0, 0, 0], lag: 25 / 2,
   },
   cine: {
-    label: 'Cinematic', off: [0, 2.3, -7.5], look: [0, 1.0, 0], lag: 25 / 3, pitch: 0, orbit: 0.30,
+    label: 'Cinematic', off: [0, 2.3, -7.5], look: [0, 1.0, 0], lag: 25 / 3, orbit: 0.30,
   },
 };
 const CAM_ORDER = ['chase', 'hood', 'bumper', 'top', 'cine'];
@@ -264,6 +268,8 @@ const raceScene = {
     if (!CAMS[mode]) return;
     this.camMode = mode;
     this.cineT = 0;
+    // snap the camera height, otherwise it would sink or rise into place
+    this.camY = this.pos.y + CAMS[mode].off[1];
     S().settings.camera = mode;
     R3D.persist();
   },
@@ -616,25 +622,28 @@ const raceScene = {
     const rad = this.camYaw * Math.PI / 180;
     const cy = Math.cos(rad), sy = Math.sin(rad);
 
-    // camera frame -> world (same convention as the wheel offsets)
+    // camera frame -> world. The car's own frame: +X is the car's right,
+    // +Z is the direction it is travelling (the wheel offsets use the
+    // opposite convention, with +Z meaning "rear", so they must not be
+    // reused here).
     const toWorld = (lx, ly, lz) => ({
-      x: this.pos.x + lx * cy - lz * sy,
+      x: this.pos.x + lx * cy + lz * sy,
       y: this.pos.y + ly,
-      z: this.pos.z + lx * sy + lz * cy,
+      z: this.pos.z + lx * sy - lz * cy,
     });
 
     let off = mode.off, look = mode.look;
     if (mode.orbit) {
-      // the cinematic camera circles the car in world space
+      // the cinematic camera circles the car in world space, high enough to
+      // stay above the roof and clear of the tree walls
       this.cineT = (this.cineT || 0) + dt * mode.orbit;
       const a = this.cineT;
       const c = this.pos;
-      off = [Math.sin(a) * 7.5, 2.3 + Math.sin(a * 0.7) * 0.6, Math.cos(a) * 7.5];
-      look = [0, 1.0, 0];
-      const wp = { x: c.x + off[0], y: c.y + off[1], z: c.z + off[2] };
-      this.camPos.set(wp.x, wp.y, wp.z);
+      const rad = 6.4;
+      off = [Math.sin(a) * rad, 3.7 + Math.sin(a * 0.7) * 0.5, Math.cos(a) * rad];
+      this.camPos.set(c.x + off[0], c.y + off[1], c.z + off[2]);
       camera.position.copy(this.camPos);
-      camera.lookAt(this.pos.x, this.pos.y + 1.0, this.pos.z);
+      camera.lookAt(c.x, c.y + 1.3, c.z);
       this.setHorizonFromLook();
       this.placeCar();
       return;
@@ -863,30 +872,55 @@ const raceScene = {
   },
 
   // -------------------------------------------------- on-screen touch controls
-  // Squared pads in the same technical language as the HUD: translucent grey
-  // plates with a thin white rule, an arrow glyph, and an amber fill while
-  // held. They are "hold" areas, so steering and throttle work together.
+  // The pads are real controls, not flat boxes: a glass plate with a hairline
+  // edge and an inner highlight, a solid glyph, and an inverted fill while
+  // they are held. They are "hold" areas, so steering and throttle work
+  // together and a thumb can slide from one to the next.
   drawControls() {
     if (S().settings.buttons === 0) return;
-    const bs = 78;                       // steering pad size
-    const by = H - bs - 14;
-    this.pad('L', 20, by, bs, bs, 3, '◀', R3D.isHeld('L'));
-    this.pad('R', 20 + bs + 10, by, bs, bs, 1, '▶', R3D.isHeld('R'));
+    const bs = 76;
+    const by = H - bs - 16;
+    this.pad('L', 22, by, bs, bs, 3, R3D.isHeld('L'));
+    this.pad('R', 22 + bs + 12, by, bs, bs, 1, R3D.isHeld('R'));
     // throttle (big) and brake (smaller) on the right
-    const gx = W - 104, gy = H - 100, gs = 90;
-    this.pad('U', gx, gy, gs, gs, 0, '▲', R3D.isHeld('U'), 'GAS');
-    this.pad('D', gx - 84, H - 86, 72, 72, 2, '▼', R3D.isHeld('D'), 'BRAKE');
+    this.pad('U', W - 104, H - 100, 90, 90, 0, R3D.isHeld('U'), 'GAS');
+    this.pad('D', W - 194, H - 86, 70, 70, 2, R3D.isHeld('D'), 'BRAKE');
   },
-  pad(id, x, y, w, h, dir, glyph, pressed, caption) {
-    panel(x, y, w, h, {
-      r: 3,
-      fill: pressed ? 'rgba(255,196,0,0.30)' : 'rgba(24,27,32,0.42)',
-      borderColor: pressed ? C.accent : 'rgba(255,255,255,0.30)',
-      lw: pressed ? 2 : 1,
-    });
-    R3D.iconArrow(x + w / 2, y + h / 2 - (caption ? 8 : 0), 26, dir,
-      pressed ? C.accent : 'rgba(255,255,255,0.88)');
-    if (caption) tag(caption, x + w / 2, y + h - 22, 5, pressed ? C.accent : C.dim, 10, 1.4);
+  pad(id, x, y, w, h, dir, pressed, caption) {
+    const r = 6;
+    // the plate
+    roundRect(x, y, w, h, r);
+    const g = ui.createLinearGradient(0, y, 0, y + h);
+    if (pressed) {
+      g.addColorStop(0, 'rgba(255,196,0,0.34)');
+      g.addColorStop(1, 'rgba(255,196,0,0.16)');
+    } else {
+      g.addColorStop(0, 'rgba(228,236,246,0.16)');
+      g.addColorStop(1, 'rgba(90,104,122,0.10)');
+    }
+    ui.fillStyle = g;
+    ui.fill();
+    ui.strokeStyle = pressed ? C.accent : 'rgba(255,255,255,0.26)';
+    ui.lineWidth = 1;
+    ui.stroke();
+    // inner highlight along the top edge
+    ui.fillStyle = pressed ? 'rgba(255,220,120,0.45)' : 'rgba(255,255,255,0.13)';
+    ui.fillRect(x + 3, y + 1, w - 6, 1);
+    // the glyph: a solid triangle, inverted when held
+    const cx = x + w / 2, cy = y + h / 2 - (caption ? 7 : 0);
+    const s = w * 0.30;
+    ui.save();
+    ui.translate(cx, cy);
+    ui.rotate(dir * Math.PI / 2);
+    ui.beginPath();
+    ui.moveTo(0, -s * 0.55);
+    ui.lineTo(s * 0.52, s * 0.40);
+    ui.lineTo(-s * 0.52, s * 0.40);
+    ui.closePath();
+    ui.fillStyle = pressed ? '#101318' : 'rgba(255,255,255,0.92)';
+    ui.fill();
+    ui.restore();
+    if (caption) tag(caption, cx, y + h - 20, 5, pressed ? '#101318' : C.dim, 10, 1.6);
     holdArea(id, x, y, w, h);
   },
 
@@ -913,7 +947,6 @@ const raceScene = {
       AudioSys.sfx('plink1');
       this.phase = 'countdown'; this.cd = 0; this.cdN = 0;
     });
-    tag('Steer with ◀ ▶   ·   Accelerate with ▲', 26, H - 26, 0, C.faint, 12, 1.2);
     // small back button
     const bxx = 38, byy = 70, rr = 15;
     panel(bxx - rr, byy - rr, rr * 2, rr * 2, { r: 2, fill: 'rgba(12,14,18,0.80)' });
@@ -934,16 +967,16 @@ const raceScene = {
     plate(x, y, cw, ch, { r: 2, fill: 'rgba(10,12,16,0.94)', topLine: 'rgba(255,255,255,0.10)' });
     tag(this.pausePage === 1 ? D.lang[107] : 'Paused', W / 2, y + 26, 5, C.accent, 15, 2.2);
     if (this.pausePage === 1) {
-      tag('Tap a row to change it  ·  C switches camera', W / 2, y + 46, 5, C.faint, 10, 0.9);
+      tag('Tap a row to change it', W / 2, y + 46, 5, C.faint, 10, 0.9);
     }
     let iy = y + (this.pausePage === 1 ? 62 : 52);
     items.forEach((it, i) => {
       const active = i === this.pauseSel;
       plate(x + 16, iy, cw - 32, 34, {
         r: 2,
-        fill: active ? 'rgba(255,196,0,0.12)' : 'rgba(255,255,255,0.05)',
         borderColor: active ? C.accent : 'rgba(255,255,255,0.12)',
         lw: active ? 2 : 1,
+        topLine: active ? 'rgba(255,214,110,0.28)' : 'rgba(255,255,255,0.09)',
       });
       if (active) { ui.fillStyle = C.accent; ui.fillRect(x + 16, iy, 3, 34); }
       tag(it.label, x + 32, iy + 11, 0, active ? C.accent : C.text, 13, 0.9);

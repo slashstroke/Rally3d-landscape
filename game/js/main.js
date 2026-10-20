@@ -20,7 +20,9 @@ const renderer = new THREE.WebGLRenderer({
   canvas: glCanvas, antialias: false, alpha: true, preserveDrawingBuffer: true,
 });
 renderer.setClearColor(0x000000, 0);
-const camera = new THREE.PerspectiveCamera(52, W / H, 1, 128);
+// the near plane has to be close: the hood and bumper cameras sit within a
+// unit of the car, and anything nearer than the old 1-unit plane was clipped
+const camera = new THREE.PerspectiveCamera(52, W / H, 0.25, 128);
 R3D._renderer = renderer;
 R3D._camera = camera;
 R3D._gl = glCanvas;

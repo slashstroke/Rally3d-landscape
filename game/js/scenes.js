@@ -77,9 +77,10 @@ function bigButton(id, x, y, w, h, label, onTap, opts) {
   const active = !!opts.active;
   panel(x, y, w, h, {
     r: 2,
-    fill: active ? 'rgba(255,196,0,0.10)' : (opts.fill || PLATE),
+    fill: opts.fill || PLATE,
     borderColor: active ? C.accent : (opts.border || 'rgba(255,255,255,0.14)'),
     lw: active ? 2 : 1,
+    topLine: active ? 'rgba(255,214,110,0.28)' : 'rgba(255,255,255,0.10)',
   });
   if (active) {
     ui.fillStyle = C.accent;
@@ -180,9 +181,8 @@ const titleScene = {
     ui.fillStyle = g; ui.fillRect(150, 0, 140, H);
     const lh = logo(20, 24, 224) || 37;
     // the caption sits on its own plate so it stays readable over the art
-    panel(14, 24 + lh + 2, 236, 46, { r: 2, fill: 'rgba(8,9,11,0.62)', border: false });
-    tag('Landscape edition', 24, 24 + lh + 10, 0, C.accent, 12, 2);
-    tag('Nokia J2ME classic, rebuilt for phones', 24, 24 + lh + 28, 0, C.dim, 11, 1.2);
+    panel(14, 24 + lh + 2, 166, 26, { r: 2, fill: 'rgba(8,9,11,0.66)', border: false });
+    tag('Landscape edition', 24, 24 + lh + 9, 0, C.accent, 12, 2);
 
     menuColumn(this.items(), (i) => { this.sel = i; this.pick(i); }, {
       x: 336, w: 282, y: 96, sel: this.sel,
