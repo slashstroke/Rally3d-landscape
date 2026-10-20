@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, minimum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#08090b">
+<title>Rally 3D — Landscape Edition</title>
+<style>
+  html, body {
+    margin: 0; padding: 0; height: 100%; overflow: hidden;
+    background: #08090b;
+    color: #ffffff;
+    font-family: "Segoe UI", system-ui, -apple-system, Roboto, Arial, sans-serif;
+    -webkit-user-select: none; user-select: none;
+    -webkit-tap-highlight-color: transparent;
+    overscroll-behavior: none;
+  }
+  body {
+    display: flex; align-items: center; justify-content: center;
+    background: radial-gradient(130% 120% at 50% 0%, #1b1f26 0%, #08090b 70%);
+  }
+  #wrap { position: relative; box-shadow: 0 18px 60px rgba(0,0,0,0.6); }
+  canvas {
+    display: block; image-rendering: pixelated; position: absolute; top: 0; left: 0;
+  }
+  #gl { z-index: 1; }
+  #ui { z-index: 2; touch-action: none; }
+  #boot {
+    position: absolute; inset: 0; z-index: 5;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    background: #08090b; text-align: center; padding: 20px;
+  }
+  #boot h1 { font-size: 20px; letter-spacing: 4px; margin: 0 0 8px 0; color: #ffffff; }
+  #boot p { font-size: 11px; letter-spacing: 1px; color: rgba(224,231,240,0.6); margin: 4px; }
+  #bar { width: 200px; height: 6px; border: 1px solid rgba(255,255,255,0.24); margin-top: 16px; }
+  #bar div { height: 100%; width: 0%; background: #ffc400; transition: width .2s; }
+  /* rotate-your-device hint (portrait phones) */
+  #rotate {
+    position: fixed; inset: 0; z-index: 9; display: none;
+    flex-direction: column; align-items: center; justify-content: center;
+    background: #08090b; text-align: center; padding: 30px;
+  }
+  #rotate .phone {
+    width: 74px; height: 122px; border: 3px solid #22b4ff; border-radius: 12px;
+    margin-bottom: 22px; animation: turn 2.4s ease-in-out infinite;
+  }
+  #rotate h2 { font-size: 17px; margin: 0 0 8px; color: #ffc400; }
+  #rotate p { font-size: 13px; color: rgba(224,231,240,0.7); margin: 4px; max-width: 280px; }
+  @keyframes turn {
+    0%, 30% { transform: rotate(0deg); }
+    60%, 100% { transform: rotate(90deg); }
+  }
+  #rotate button {
+    margin-top: 18px; padding: 12px 22px; font-size: 14px; font-weight: 600;
+    color: #08090b; background: #ffc400; border: 0; border-radius: 2px;
+  }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <canvas id="gl" width="640" height="360"></canvas>
+  <canvas id="ui" width="640" height="360"></canvas>
+  <div id="boot">
+    <h1>RALLY 3D</h1>
+    <p>Original Nokia J2ME game &middot; landscape edition</p>
+    <div id="bar"><div></div></div>
+    <p id="bootmsg">loading original assets...</p>
+  </div>
+</div>
+
+<div id="rotate">
+  <div class="phone"></div>
+  <h2>Rotate your phone</h2>
+  <p>Rally 3D landscape edition plays best in landscape mode.</p>
+  <button id="rotbtn">Play anyway</button>
+</div>
+
+<script src="js/three.min.js?v=1"></script>
+<script src="js/data.js?v=1"></script>
+<script src="js/tinysynth.js?v=1"></script>
+<script src="js/engine.js?v=1"></script>
+<script src="js/main.js?v=1"></script>
+<script src="js/scenes.js?v=1"></script>
+<script src="js/race.js?v=1"></script>
+<script>
+  const bar = document.querySelector('#bar div');
+  const msg = document.getElementById('bootmsg');
+  bar.style.width = '25%';
+
+  // portrait hint on phones
+  const rotate = document.getElementById('rotate');
+  const rotbtn = document.getElementById('rotbtn');
+  let forced = false;
+  function checkOrientation() {
+    const portrait = window.innerHeight > window.innerWidth * 1.02;
+    const small = Math.min(window.innerWidth, window.innerHeight) < 520;
+    rotate.style.display = (portrait && small && !forced) ? 'flex' : 'none';
+  }
+  rotbtn.addEventListener('click', () => { forced = true; rotate.style.display = 'none'; });
+  window.addEventListener('resize', checkOrientation);
+  window.addEventListener('orientationchange', () => setTimeout(checkOrientation, 200));
+  checkOrientation();
+
+  // stop the page from scrolling / zooming under the canvas
+  document.addEventListener('touchmove', (e) => e.preventDefault(), { passive: false });
+  document.addEventListener('gesturestart', (e) => e.preventDefault());
+
+  window.R3D.start().then(() => {
+    bar.style.width = '100%';
+    msg.textContent = 'ready - tap or press a key';
+    const boot = document.getElementById('boot');
+    const hide = () => { boot.style.display = 'none'; window.removeEventListener('keydown', hide); };
+    setTimeout(hide, 500);
+    window.addEventListener('keydown', hide);
+    document.addEventListener('pointerdown', hide);
+  }).catch((e) => {
+    msg.textContent = 'load error: ' + e;
+    console.error(e);
+  });
+</script>
+</body>
+</html>

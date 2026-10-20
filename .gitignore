@@ -1,0 +1,31 @@
+# ---- Python -------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.venv/
+venv/
+
+# ---- Node / web ---------------------------------------------------------
+node_modules/
+npm-debug.log*
+yarn-error.log*
+
+# ---- Editors and OS -----------------------------------------------------
+.vscode/
+.idea/
+*.swp
+*~
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ---- Logs and scratch ----------------------------------------------------
+*.log
+*.tmp
+*.bak
+
+# ---- Dev capture output --------------------------------------------------
+# tools/shotserver.py writes rendered frames here while working on the UI.
+# The hand-picked reference frames live in docs/screenshots/.
+shots/
