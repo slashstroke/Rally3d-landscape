@@ -241,6 +241,8 @@ const trackSelectScene = {
   pick(i) {
     if (S().medals[i] >= 4) return;
     R3D.game.trackIdx = i;
+    // the championship runs its twelve races in order
+    if (R3D.game.mode === 'champ') R3D.game.raceIdx = S().champ % 12;
     R3D.setScene(carSelectScene);
   },
   update() {

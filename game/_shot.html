@@ -48,6 +48,15 @@
     }
     return false;
   };
+  const tapAt = async (lx, ly) => {
+    const c = document.getElementById('ui');
+    const r = c.getBoundingClientRect();
+    const x = r.left + (lx / 640) * r.width, y = r.top + (ly / 360) * r.height;
+    const opt = { clientX: x, clientY: y, pointerId: 1, bubbles: true, cancelable: true, isPrimary: true };
+    c.dispatchEvent(new PointerEvent('pointerdown', opt));
+    c.dispatchEvent(new PointerEvent('pointerup', opt));
+    await wait(700);
+  };
   window.R3D.start().then(async () => {
     const R = window.R3D;
     document.getElementById('boot').style.display = 'none';
@@ -113,6 +122,20 @@
       await waitScene(R.raceScene);
       const sc2 = R.currentScene();
       sc2.phase = 'racing'; sc2.goT = 0; sc2.timeT = 300; sc2.speed = num('speed', 3);
+      await wait(600);
+    }
+    // walk the whole flow: new game -> a mode -> a track -> race
+    if (q.get('flow')) {
+      const mode = q.get('flow');
+      await tapAt(480, 118);            // New game
+      await tapAt(480, mode === 'mp' ? 226 : (mode === 'tt' ? 172 : 118));
+      await waitScene(R.trackSelectScene, 6000);
+      await tapAt(90, 118);             // track 1
+      await waitScene(R.carSelectSceneRef, 6000);
+      await tapAt(480, 274);            // Race!
+      await waitScene(R.raceScene, 6000);
+      const sc3 = R.currentScene();
+      sc3.phase = 'racing'; sc3.goT = 0; sc3.timeT = 400; sc3.speed = num('speed', 3);
       await wait(600);
     }
     document.title = 'ready';
