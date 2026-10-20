@@ -697,7 +697,7 @@ const raceScene = {
       const l = toWorld(look[0], look[1], look[2]);
       camera.lookAt(l.x, l.y, l.z);
     }
-    this.applyShake(dt, camera);
+    this.applyShake(dt);
     this.setHorizonFromLook();
     this.placeCar();
   },
@@ -737,26 +737,31 @@ const raceScene = {
     // bouncing over the road
     const rough = Math.max(0, Math.min(1, (dRoll + dPitch) * 4 + dY * 6));
     // speed always gives a little rattle, rough ground gives a lot more
-    return speedK * speedK * (0.22 + rough * 0.55);
+    return speedK * speedK * (0.45 + rough * 0.55);
   },
 
-  applyShake(dt, cam) {
+  // The shake moves the WHOLE frame - the scenery, the car and the HUD
+  // together - not the camera. Shaking the camera instead would slide the
+  // car against a still background and the HUD, which reads as the car
+  // shaking rather than the view.
+  applyShake(dt) {
     // the on-car cameras are bolted to the body, so they rattle far less
-    const scale = this.camMode === 'hood' || this.camMode === 'bumper' ? 0.35 : 1;
-    const amt = this.shakeAmount() * 0.35 * scale;
-    if (amt >= 0.0015) {
-      this.shakeT = (this.shakeT || 0) + dt * (16 + 18 * Math.min(1, this.speed / 4));
+    const scale = this.camMode === 'hood' || this.camMode === 'bumper' ? 0.4 : 1;
+    // in screen pixels - a couple of pixels is a rattle, more than that is a
+    // wobble
+    const amt = this.shakeAmount() * 4.0 * scale;
+    let ox = 0, oy = 0;
+    if (amt >= 0.02) {
+      this.shakeT = (this.shakeT || 0) + dt * (14 + 16 * Math.min(1, this.speed / 4));
       const t = this.shakeT;
       // a couple of out-of-step waves read as a rattle, not as a wobble
       const sx = Math.sin(t * 1.9) * 0.6 + Math.sin(t * 4.3 + 1.1) * 0.4;
       const sy = Math.sin(t * 2.6 + 0.7) * 0.5 + Math.sin(t * 5.7) * 0.5;
-      const rad = this.camYaw * Math.PI / 180;
-      // the car's right axis, so the shake is across the road and never tilts
-      const rx = Math.cos(rad), rz = Math.sin(rad);
-      cam.position.x += rx * sx * amt;
-      cam.position.z += rz * sx * amt;
-      cam.position.y += sy * amt;
+      ox = sx * amt;
+      oy = sy * amt;
     }
+    this.shakeX = ox;
+    this.shakeY = oy;
     // remember where the car was, so the next frame can see how much the
     // suspension moved
     this.prevRoll = this.roll;
@@ -823,16 +828,21 @@ const raceScene = {
     // the background art is pinned to the horizon of whichever camera is
     // active; looking straight down there is no horizon, so it is skipped
     const hy = this.horizon;
-    ui.fillStyle = '#000'; ui.fillRect(0, 0, W, H);
+    // the whole frame - scenery, car and HUD - is nudged together, so the
+    // shake reads as the view rattling rather than the car moving
+    const sx = this.shakeX || 0, sy = this.shakeY || 0;
+    ui.save();
+    ui.translate(sx, sy);
+    ui.fillStyle = '#000'; ui.fillRect(-6, -6, W + 12, H + 12);
     if (hy === null || hy === undefined) {
-      ui.fillStyle = R3D.argb(th.ct).css; ui.fillRect(0, 0, W, H);
+      ui.fillStyle = R3D.argb(th.ct).css; ui.fillRect(-6, -6, W + 12, H + 12);
     } else {
       const y0 = Math.round(hy - 110 * BG_SCALE);
       let x0 = Math.floor((-(this.camYaw * BG_SCROLL) % bgW + bgW * 4) % bgW) - bgW;
-      if (y0 > 0) { ui.fillStyle = R3D.argb(th.N).css; ui.fillRect(0, 0, W, y0); }
-      for (let x = x0; x < W; x += bgW) ui.drawImage(bg, x, y0, bgW, bgH);
+      if (y0 > 0) { ui.fillStyle = R3D.argb(th.N).css; ui.fillRect(-6, -6, W + 12, y0 + 6); }
+      for (let x = x0 - 6; x < W + 6; x += bgW) ui.drawImage(bg, x, y0, bgW, bgH);
       const yBot = y0 + bgH;
-      if (yBot < H) { ui.fillStyle = R3D.argb(th.ct).css; ui.fillRect(0, yBot, W, H - yBot); }
+      if (yBot < H) { ui.fillStyle = R3D.argb(th.ct).css; ui.fillRect(-6, yBot, W + 12, H - yBot + 6); }
     }
 
     if (R3D.scene3d) {
@@ -847,6 +857,7 @@ const raceScene = {
     if (!this.paused && this.phase !== 'prerace' && this.phase !== 'done') this.drawControls();
     if (this.paused) this.drawPause();
     if (this.phase === 'prerace') this.drawPreRace();
+    ui.restore();
   },
 
   // -------------------------------------------------- the AI opponent
