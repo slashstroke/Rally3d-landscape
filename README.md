@@ -66,19 +66,20 @@ scenery.
 
 ## Cameras
 
-Five viewpoints, switched with the **C** key (during a race or from the pause
+Four viewpoints, switched with the **C** key (during a race or from the pause
 menu) or from *Pause → Settings → Camera*. The choice is remembered.
 
 | Camera | What you see |
 |--------|--------------|
 | **Chase** | The default: behind and above the car, with the original's trailing yaw so the car leads the camera into a corner. |
-| **Hood** | From the bonnet, just above the bonnet line, looking down the road. |
-| **Bumper** | At the very front of the car, bumper height. The fastest, most committed view. |
-| **Top down** | Straight down over the car — the rally driver's view of a corner entry. |
-| **Cinematic** | A low camera that drifts around the car while you drive. |
+| **Hood** | Over the windscreen, looking down the bonnet. |
+| **Bumper** | On the nose, at bumper height. The fastest, most committed view. |
+| **Top down** | From above, the nose pointing up the screen — the rally driver's view of a corner entry. |
 
-The background scenery is pinned to the horizon of whichever camera is
-active, so the sky and the distant hills always line up.
+The hood and bumper cameras are bolted to the car: they do not lag, and they
+are lifted if the road rises above them, so a crest or a jump can never
+swallow the view. The background scenery is pinned to the horizon of
+whichever camera is active, so the sky and the distant hills always line up.
 
 Keyboard still works for desktop testing: arrows / WASD, Enter = OK,
 Esc = back, P = pause.
@@ -98,8 +99,8 @@ Esc = back, P = pause.
 - **Touch-first input**: press-and-hold pads, tap-to-confirm, multi-touch, and
   a portrait "rotate your device" hint on phones. Every tap answers with a
   short flash so the screen never feels dead.
-- **Five cameras** — chase, hood, bumper, top-down and cinematic — switched
-  with the C key or from the pause menu.
+- **Four cameras** — chase, hood, bumper and top-down — switched with the C
+  key or from the pause menu.
 - **Screen changes**: a shutter closes over the scene, the screen swaps at
   full cover and the shutter opens again, while the scene itself drifts a few
   pixels. 180 ms in, 220 ms out — enough to follow, quick enough to feel

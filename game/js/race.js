@@ -34,27 +34,32 @@ const textMid = R3D.textMid, tagMid = R3D.tagMid;
 //   lag  - how fast the camera frame follows the car's yaw (the original
 //          chase cam trails noticeably; the rigid ones barely lag at all)
 // The car's own model is 5.45 long (nose at z = 2.73), 2.65 wide and 2.02
-// tall, so the on-car cameras have to sit clear of the bodywork: the hood
-// camera rides just above the bonnet line, the bumper camera just ahead of
-// the nose.
+// tall, so the on-car cameras have to sit clear of the bodywork.
+//
+//  chase  - behind and above, the original's trailing yaw
+//  hood   - over the windscreen, looking down the bonnet
+//  bumper - on the nose, at bumper height
+//  top    - from above, the nose pointing up the screen
+//
+// `rigid` mounts the camera on the car (no vertical lag) and `clear` keeps it
+// above the road surface, so a crest or a jump can never swallow it.
 const CAMS = {
   chase: {
     label: 'Chase', off: [0, 3.2, -9.0], look: [0, 1.4, 8], lag: 25 / 6,
   },
   hood: {
-    label: 'Hood', off: [0, 1.42, 1.55], look: [0, 0.95, 20], lag: 25 / 2.6,
+    label: 'Hood', off: [0, 1.72, 0.55], look: [0, 0.70, 16], lag: 25 / 2.6,
+    rigid: true, clear: 0.45,
   },
   bumper: {
-    label: 'Bumper', off: [0, 0.52, 3.15], look: [0, 0.30, 24], lag: 25 / 2.6,
+    label: 'Bumper', off: [0, 0.55, 2.90], look: [0, 0.34, 22], lag: 25 / 2.6,
+    rigid: true, clear: 0.35,
   },
   top: {
-    label: 'Top down', off: [0, 11.5, 0.2], look: [0, 0, 0], lag: 25 / 2,
-  },
-  cine: {
-    label: 'Cinematic', off: [0, 2.3, -7.5], look: [0, 1.0, 0], lag: 25 / 3, orbit: 0.30,
+    label: 'Top down', off: [0, 13.0, -2.2], look: [0, 0, 1.6], lag: 25 / 2,
   },
 };
-const CAM_ORDER = ['chase', 'hood', 'bumper', 'top', 'cine'];
+const CAM_ORDER = ['chase', 'hood', 'bumper', 'top'];
 
 // camera framing for the landscape frame. With a 60 degree vertical lens and
 // the camera 9 units back, the world keeps EXACTLY the original's pixel
@@ -141,7 +146,6 @@ const raceScene = {
     this.azCnt = 0; this.cI = 0; this.coastT = 0;
     this.doneT = 0; this.orbitFrom = 0;
     this.camMode = CAMS[S().settings.camera] ? S().settings.camera : 'chase';
-    this.cineT = 0;
     this.horizon = H / 2;
     this.gold = this.track.medals[0];
     this.teleport(5);
@@ -267,7 +271,6 @@ const raceScene = {
   setCamera(mode) {
     if (!CAMS[mode]) return;
     this.camMode = mode;
-    this.cineT = 0;
     // snap the camera height, otherwise it would sink or rise into place
     this.camY = this.pos.y + CAMS[mode].off[1];
     S().settings.camera = mode;
@@ -605,7 +608,7 @@ const raceScene = {
   // -------------------------------------------------- camera
   // The chase cam keeps the original's trailing yaw (the car visibly leads
   // the camera into a corner). The other viewpoints are mounted on the car
-  // and barely lag at all, and the cinematic one drifts around it.
+  // and barely lag at all.
   updateCamera(dt) {
     const done = this.phase === 'done' && this.doneT > 1 && this.coastT > 0;
     const mode = CAMS[this.camMode] || CAMS.chase;
@@ -633,24 +636,18 @@ const raceScene = {
     });
 
     let off = mode.off, look = mode.look;
-    if (mode.orbit) {
-      // the cinematic camera circles the car in world space, high enough to
-      // stay above the roof and clear of the tree walls
-      this.cineT = (this.cineT || 0) + dt * mode.orbit;
-      const a = this.cineT;
-      const c = this.pos;
-      const rad = 6.4;
-      off = [Math.sin(a) * rad, 3.7 + Math.sin(a * 0.7) * 0.5, Math.cos(a) * rad];
-      this.camPos.set(c.x + off[0], c.y + off[1], c.z + off[2]);
-      camera.position.copy(this.camPos);
-      camera.lookAt(c.x, c.y + 1.3, c.z);
-      this.setHorizonFromLook();
-      this.placeCar();
-      return;
-    }
-
     const p = toWorld(off[0], off[1], off[2]);
-    this.camY += (p.y - this.camY) * (1 - Math.exp(-dt * 25 / 1.6));
+    if (mode.rigid) {
+      // a camera bolted to the car: no vertical lag at all, and it is lifted
+      // if the road underneath rises above it (a crest, a jump)
+      this.camY = p.y;
+      if (mode.clear) {
+        const g = R3D.sampleGround(this.world, p.x, p.z, this.segHint);
+        if (g && p.y < g.y + mode.clear) this.camY = g.y + mode.clear;
+      }
+    } else {
+      this.camY += (p.y - this.camY) * (1 - Math.exp(-dt * 25 / 1.6));
+    }
     this.camPos.set(p.x, this.camY, p.z);
     camera.position.copy(this.camPos);
 
@@ -929,18 +926,18 @@ const raceScene = {
     ui.fillStyle = 'rgba(4,5,7,0.55)';
     ui.fillRect(0, 0, W, H);
     // banner card at the top
-    panel(66, 14, W - 96, 112, { r: 2, fill: 'rgba(12,14,18,0.90)' });
-    checkers(84, 30, W - 132, 4, 8);
-    tag(R3D.game.mode === 'champ' ? D.lang[17] : D.lang[71], W / 2 + 14, 44, 5, C.accent, 12, 1.6);
-    text(this.track.name, W / 2 + 14, 62, 5, C.white, 28, '700', 0, true);
-    tag(D.cars[R3D.game.carIdx].name, W / 2 + 14, 100, 5, C.dim, 12, 1.4);
+    plate(66, 14, W - 96, 104, { r: 2, fill: 'rgba(12,14,18,0.90)', topLine: 'rgba(255,255,255,0.10)' });
+    tag(R3D.game.mode === 'champ' ? D.lang[17] : D.lang[71], W / 2 + 14, 32, 5, C.accent, 12, 1.6);
+    text(this.track.name, W / 2 + 14, 50, 5, C.white, 28, '700', 0, true);
+    tag(D.cars[R3D.game.carIdx].name, W / 2 + 14, 88, 5, C.dim, 12, 1.4);
     // big start button, kept clear of the car in the middle of the screen
     const bw = 200, bh = 56, bx = W - bw - 26, by = H - bh - 26;
-    panel(bx, by, bw, bh, { r: 2, fill: 'rgba(255,196,0,0.16)', borderColor: C.accent, lw: 2 });
+    plate(bx, by, bw, bh, { r: 2, fill: 'rgba(255,196,0,0.16)', borderColor: C.accent, lw: 2 });
     const pulse = 0.5 + 0.5 * Math.sin(R3D.clock * 3);
     ui.save();
     ui.globalAlpha = 0.25 + 0.3 * pulse;
-    panel(bx - 3, by - 3, bw + 6, bh + 6, { r: 2, borderColor: C.accent, lw: 1 });
+    roundRect(bx - 3, by - 3, bw + 6, bh + 6, 4);
+    ui.strokeStyle = C.accent; ui.lineWidth = 1; ui.stroke();
     ui.restore();
     tag('Tap to start', bx + bw / 2, by + 20, 5, C.white, 17, 2);
     tapArea('start', bx, by, bw, bh, () => {
@@ -948,8 +945,8 @@ const raceScene = {
       this.phase = 'countdown'; this.cd = 0; this.cdN = 0;
     });
     // small back button
-    const bxx = 38, byy = 70, rr = 15;
-    panel(bxx - rr, byy - rr, rr * 2, rr * 2, { r: 2, fill: 'rgba(12,14,18,0.80)' });
+    const bxx = 38, byy = 66, rr = 15;
+    plate(bxx - rr, byy - rr, rr * 2, rr * 2, { r: 2, fill: 'rgba(12,14,18,0.80)' });
     R3D.iconArrow(bxx, byy, 14, 3, C.white);
     tapArea('pback', bxx - rr - 4, byy - rr - 4, rr * 2 + 8, rr * 2 + 8, () => {
       R3D.clearScene3d();

@@ -15,8 +15,8 @@ const ui = document.getElementById('ui').getContext('2d');
 const renderer = R3D._renderer, camera = R3D._camera;
 const S = () => R3D.saveObj;
 const C = R3D.colors;
-const text = R3D.text, tag = R3D.tag, panel = R3D.panel, checkers = R3D.checkers,
-      roundRect = R3D.roundRect, measure = R3D.measure,
+const text = R3D.text, tag = R3D.tag, panel = R3D.panel, plate = R3D.plate,
+      checkers = R3D.checkers, roundRect = R3D.roundRect, measure = R3D.measure,
       wasPressed = R3D.wasPressed, AudioSys = R3D.audio,
       tapArea = R3D.tapArea;
 
@@ -36,7 +36,7 @@ function header(title, opts) {
   opts = opts || {};
   if (opts.back) {
     const bx = PAD, by = HEAD_Y, r = 15;
-    panel(bx, by, r * 2, r * 2, { r: 2, fill: PLATE });
+    plate(bx, by, r * 2, r * 2, { r: 2 });
     R3D.iconArrow(bx + r, by + r, 14, 3, C.white);
     tapArea('back', bx - 4, by - 4, r * 2 + 8, r * 2 + 8, () => {
       if (opts.back === 'title') R3D.setScene(titleScene);
@@ -46,7 +46,7 @@ function header(title, opts) {
   } else {
     tag(title, PAD, HEAD_Y + 8, 0, C.white, 16, 2);
   }
-  checkers(0, STRIP_Y, W, 3, 8);
+  if (opts.strip !== false) checkers(0, STRIP_Y, W, 3, 8);
 }
 
 function lockIcon(x, y) {
@@ -97,6 +97,12 @@ function bigButton(id, x, y, w, h, label, onTap, opts) {
   if (opts.right) {
     tag(opts.right, x + w - 18, ty, 8, opts.rightColor || C.accent2, opts.rightSize || 12, 0.9);
   }
+  if (opts.dot) {
+    ui.beginPath();
+    ui.arc(x + w - 22, y + h / 2, 4, 0, Math.PI * 2);
+    ui.fillStyle = C.accent2;
+    ui.fill();
+  }
   // press feedback - the row flashes for a fraction of a second
   const fl = R3D.flashFor(id);
   if (fl > 0) {
@@ -122,6 +128,7 @@ function menuColumn(items, onPick, opts) {
       active: opts.sel === i,
       right: it.right,
       rightColor: it.rightColor,
+      dot: it.dot,
       color: it.locked ? C.faint : undefined,
       fill: it.fill,
       size: it.size || 15,
@@ -319,10 +326,10 @@ const trackSelectScene = {
 
 // ==================================================================== CAR SELECT
 const carSelectScene = {
-  sel: 0, yaw: 0, v: 26, spinVel: 250, menuMusic: true, confirmT: 0,
+  sel: 0, yaw: 0, v: 32, spinVel: 250, menuMusic: true, confirmT: 0,
   enter() {
     this.sel = R3D.game.carIdx || 0;
-    this.yaw = 0; this.v = 26; this.spinVel = 250; this.confirmT = 0;
+    this.yaw = 0; this.v = 32; this.spinVel = 250; this.confirmT = 0;
     R3D.clearScene3d();
     camera.position.set(0, 0, 0);
     camera.rotation.set(0, 0, 0);
@@ -394,47 +401,40 @@ const carSelectScene = {
       renderer.setViewport(0, 0, W, H);
       ui.drawImage(R3D._gl, 0, 0, W, H);
     }
-    const g = ui.createLinearGradient(SHOP_W - 60, 0, SHOP_W + 6, 0);
-    g.addColorStop(0, 'rgba(8,9,11,0)');
-    g.addColorStop(1, 'rgba(8,9,11,0.9)');
-    ui.fillStyle = g; ui.fillRect(SHOP_W - 60, 0, 66, H);
 
-    header('Select car', { back: () => R3D.setScene(trackSelectScene) });
-    const car = D.cars[this.sel];
+    header('Select car', { back: () => R3D.setScene(trackSelectScene), strip: false });
     const locked = S().cars[this.sel] === 1;
-    // the selected car's card sits under the showroom, clear of the model
-    panel(16, 212, 252, 130, { r: 2, fill: 'rgba(10,12,16,0.90)', topLine: 'rgba(255,255,255,0.12)' });
-    text(car.name, 30, 224, 0, locked ? C.faint : C.white, 19, '700', 0, true);
+    // the stat card sits under the model, clear of it
+    plate(16, 250, 252, 92, { r: 2, fill: 'rgba(10,12,16,0.88)', topLine: 'rgba(255,255,255,0.10)' });
     if (locked) {
-      tag(D.lang[9], 30, 256, 0, C.accent, 12, 1.6);
+      tag(D.lang[9], 30, 266, 0, C.accent, 12, 1.6);
       const msgs = ['4x ' + D.lang[8], '8x ' + D.lang[60], '12x ' + D.lang[28]];
-      msgs.forEach((m, i) => tag(m, 30, 280 + i * 20, 0, C.dim, 12, 1.2));
+      msgs.forEach((m, i) => tag(m, 30, 292 + i * 18, 0, C.dim, 11, 1.2));
     } else {
       const bars = [[D.lang[65], R3D.STAT_TOP], [D.lang[4], R3D.STAT_ACC], [D.lang[30], R3D.STAT_GRIP]];
-      let y = 258;
+      let y = 266;
       for (const [label, stat] of bars) {
-        tag(label, 30, y, 0, C.dim, 11, 1.4);
+        tag(label, 30, y, 0, C.dim, 10, 1.4);
         const bx = 78, bw = 170;
         ui.fillStyle = 'rgba(255,255,255,0.12)';
-        ui.fillRect(bx, y + 3, bw, 9);
+        ui.fillRect(bx, y + 3, bw, 8);
         ui.fillStyle = C.accent2;
-        ui.fillRect(bx, y + 3, Math.max(6, bw * stat[this.sel] / 100), 9);
-        y += 26;
+        ui.fillRect(bx, y + 3, Math.max(6, bw * stat[this.sel] / 100), 8);
+        y += 24;
       }
     }
 
     const items = D.cars.map((c, i) => ({
       label: c.name,
       locked: S().cars[i] === 1,
-      right: S().cars[i] === 1 ? '' : 'OK',
-      rightColor: C.accent2,
+      dot: S().cars[i] === 0,
     }));
-    menuColumn(items, (i) => { this.sel = i; this.swap(); }, { x: COL_X, y: 74, h: 38, gap: 6, sel: this.sel });
+    menuColumn(items, (i) => { this.sel = i; this.swap(); }, { x: COL_X, y: 74, h: 36, gap: 6, sel: this.sel });
     if (!locked) {
-      bigButton('race', COL_X, 246, COL_W, 56, 'Race!', () => this.start(), {
+      bigButton('race', COL_X, 250, COL_W, 56, 'Race!', () => this.start(), {
         active: true, center: true, size: 20, color: C.white, fill: 'rgba(255,196,0,0.12)', border: C.accent,
       });
-      tag('Drag the car to spin it', COL_X, 312, 0, C.faint, 11, 1.2);
+      tag('Drag the car to spin it', COL_X, 316, 0, C.faint, 11, 1.2);
     }
   },
 };
