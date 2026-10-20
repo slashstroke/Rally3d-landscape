@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<!-- Development harness: loads the game and drives it to a given state so a
+     headless browser can screenshot it. Not part of the shipped game.
+     Usage: _shot.html?scene=race&cam=hood&speed=6&blur=1&light=1&shadow=1 -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Rally 3D — shot</title>
+<script>
+  window.__errs = [];
+  window.addEventListener('error', (e) => window.__errs.push(e.message + ' @' + (e.filename || '').split('/').pop() + ':' + e.lineno));
+</script>
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; background: #08090b; }
+  body { display: flex; align-items: center; justify-content: center; }
+  #wrap { position: relative; }
+  canvas { display: block; image-rendering: pixelated; position: absolute; top: 0; left: 0; }
+  #gl { z-index: 1; }
+  #ui { z-index: 2; touch-action: none; }
+  #boot { position: absolute; inset: 0; z-index: 5; display: flex; align-items: center;
+          justify-content: center; background: #08090b; color: #fff; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <canvas id="gl" width="640" height="360"></canvas>
+  <canvas id="ui" width="640" height="360"></canvas>
+  <div id="boot">loading…</div>
+</div>
+<script src="js/three.min.js?v=2"></script>
+<script src="js/data.js?v=2"></script>
+<script src="js/tinysynth.js?v=2"></script>
+<script src="js/engine.js?v=2"></script>
+<script src="js/main.js?v=2"></script>
+<script src="js/scenes.js?v=2"></script>
+<script src="js/race.js?v=2"></script>
+<script>
+  const q = new URLSearchParams(location.search);
+  const num = (k, d) => (q.has(k) ? parseFloat(q.get(k)) : d);
+  const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+  // wait until the scene has actually been applied (the transition needs the
+  // animation loop to run)
+  const waitScene = async (want, ms) => {
+    const t0 = Date.now();
+    while (Date.now() - t0 < (ms || 6000)) {
+      if (R3D.currentScene() === want) return true;
+      await wait(80);
+    }
+    return false;
+  };
+  window.R3D.start().then(async () => {
+    const R = window.R3D;
+    document.getElementById('boot').style.display = 'none';
+    const st = R.saveObj.settings;
+    if (q.has('blur')) st.motionBlur = num('blur', 1);
+    if (q.has('light')) st.lighting = num('light', 1);
+    if (q.has('shadow')) st.shadows = num('shadow', 1);
+    if (q.has('car')) R.game.carIdx = num('car', 0);
+    // the boot transition may still be running; a second setScene would be
+    // dropped while one is pending
+    for (let i = 0; i < 100 && R.isTransitioning && R.isTransitioning(); i++) await wait(100);
+    const scene = q.get('scene') || 'title';
+    if (scene === 'race') {
+      R.setScene(R.raceScene);
+      await waitScene(R.raceScene);
+      const sc = R.currentScene();
+      sc.phase = 'racing';
+      sc.goT = 0;
+      sc.timeT = num('time', 412);
+      sc.speed = num('speed', 4.3);
+      if (q.get('cam')) sc.setCamera(q.get('cam'));
+      if (q.get('pause')) { sc.paused = true; sc.pausePage = num('pause', 0) ? 1 : 0; }
+      await wait(400);
+    } else if (scene === 'carselect') {
+      R.setScene(R.carSelectSceneRef);
+      await waitScene(R.carSelectSceneRef);
+      await wait(600);
+    } else if (scene === 'trackselect') {
+      R.setScene(R.trackSelectScene);
+      await waitScene(R.trackSelectScene);
+      await wait(300);
+    } else if (scene === 'settings') {
+      R.setScene(R.settingsScene);
+      await waitScene(R.settingsScene);
+      const ss = R.currentScene();
+      if (q.get('gfx')) { ss.page = 1; ss.sel = 0; }
+      await wait(300);
+    } else if (scene === 'pause') {
+      R.setScene(R.raceScene);
+      await waitScene(R.raceScene);
+      const sc = R.currentScene();
+      sc.phase = 'racing';
+      sc.paused = true;
+      sc.pausePage = num('pause', 0) ? 1 : 0;
+      sc.pauseSel = num('sel', 0);
+      await wait(400);
+    }
+    document.title = 'ready';
+  }).catch((e) => { document.title = 'error: ' + e.message + ' | same=' + (window.R3D.currentScene() === window.R3D.raceScene) + ' | cur=' + (window.R3D.currentScene() ? Object.keys(window.R3D).filter(k => window.R3D[k] === window.R3D.currentScene()).join(',') : 'null') + ' | fn=' + (window.R3D.raceScene && typeof window.R3D.raceScene.setCamera) + ' | race=' + (typeof (window.R3D && window.R3D.raceScene)) + ' | ' + (window.__errs || []).join(' ; '); });
+</script>
+</body>
+</html>

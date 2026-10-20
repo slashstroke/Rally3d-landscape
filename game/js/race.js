@@ -141,12 +141,19 @@ const raceScene = {
     this.theme = this.track.theme;
     if (this._propGeos) for (const key in this._propGeos) for (const g of this._propGeos[key]) g.dispose();
     this._propGeos = null;
-    this.world = R3D.buildTrack(this.track);
+    const gfx = S().settings;
+    this.world = R3D.buildTrack(this.track, { lighting: gfx.lighting !== 0 });
     R3D.clearScene3d();
     const sc = new THREE.Scene();
     for (const m of this.world.tileMeshes) sc.add(m);
-    this.car = R3D.buildCar(R3D.game.carIdx);
+    this.car = R3D.buildCar(R3D.game.carIdx, gfx.lighting !== 0);
     sc.add(this.car);
+    this.lights = R3D.buildLights(sc);
+    this.setLightLevel(gfx.lighting !== 0);
+    this.shadow = R3D.buildShadow();
+    this.shadow.scale.set(3.4, 4.6, 1);
+    this.shadow.visible = gfx.shadows !== 0;
+    sc.add(this.shadow);
     this.buildPropBillboards(sc);
     R3D.scene3d = sc;
     camera.aspect = W / H;
@@ -247,6 +254,9 @@ const raceScene = {
       return [
         { label: 'Camera', right: (CAMS[this.camMode] || CAMS.chase).label },
         { label: 'Touch controls', right: st.buttons === 0 ? 'hidden' : 'shown' },
+        { label: 'Motion blur', right: st.motionBlur === 0 ? 'off' : 'on' },
+        { label: 'Lighting', right: st.lighting === 0 ? 'off' : 'on' },
+        { label: 'Shadows', right: st.shadows === 0 ? 'off' : 'on' },
         { label: 'Auto acceleration', right: st.auto === 1 ? 'on' : 'off' },
         { label: 'Speed units', right: [D.lang[66], D.lang[67]][st.units] },
       ];
@@ -263,9 +273,13 @@ const raceScene = {
       const st = S().settings;
       if (i === 0) this.cycleCamera();
       else if (i === 1) st.buttons = (st.buttons + 1) % 2;
-      else if (i === 2) st.auto = (st.auto + 1) % 2;
+      else if (i === 2) st.motionBlur = (st.motionBlur + 1) % 2;
+      else if (i === 3) st.lighting = (st.lighting + 1) % 2;
+      else if (i === 4) st.shadows = (st.shadows + 1) % 2;
+      else if (i === 5) st.auto = (st.auto + 1) % 2;
       else st.units = (st.units + 1) % 2;
       R3D.persist();
+      if (i >= 2 && i <= 4) this.rebuildGraphics();
       return;
     }
     if (i === 0) this.resumeRace();
@@ -708,6 +722,43 @@ const raceScene = {
     );
   },
 
+  // the contact shadow follows the car and fades as it leaves the ground
+  updateShadow() {
+    if (!this.shadow || !this.shadow.visible) return;
+    const g = R3D.sampleGround(this.world, this.pos.x, this.pos.z, this.segHint);
+    const y = g ? g.y : this.pos.y;
+    this.shadow.position.set(this.pos.x, y + 0.10, this.pos.z);
+    this.shadow.rotation.set(-Math.PI / 2, (180 - this.yaw) * Math.PI / 180, 0);
+    const air = Math.max(0, this.pos.y - y);
+    this.shadow.material.opacity = 0.5 * Math.max(0, 1 - air * 0.5);
+  },
+
+  setLightLevel(on) {
+    if (!this.lights) return;
+    this.lights.sun.intensity = on ? 0.5 : 0;
+    this.lights.ambient.intensity = on ? 0.55 : 1.0;
+  },
+
+  // a graphics setting changed: rebuild what it affects, without touching the
+  // state of the race
+  rebuildGraphics() {
+    const gfx = S().settings;
+    const sc = R3D.scene3d;
+    if (!sc) return;
+    for (const m of this.world.tileMeshes) {
+      sc.remove(m);
+      if (m.geometry) m.geometry.dispose();
+    }
+    this.world = R3D.buildTrack(this.track, { lighting: gfx.lighting !== 0 });
+    for (const m of this.world.tileMeshes) sc.add(m);
+    const old = this.car;
+    this.car = R3D.buildCar(R3D.game.carIdx, gfx.lighting !== 0);
+    sc.add(this.car);
+    sc.remove(old);
+    this.setLightLevel(gfx.lighting !== 0);
+    if (this.shadow) this.shadow.visible = gfx.shadows !== 0;
+  },
+
   // -------------------------------------------------- draw
   draw() {
     const th = this.tc;
@@ -731,7 +782,8 @@ const raceScene = {
     if (R3D.scene3d) {
       this.updateTileWindow();
       this.updateProps();
-      renderer.render(R3D.scene3d, camera);
+      this.updateShadow();
+      this.renderScene();
       ui.drawImage(R3D._gl, 0, 0, W, H);
     }
 
@@ -739,6 +791,86 @@ const raceScene = {
     if (!this.paused && this.phase !== 'prerace' && this.phase !== 'done') this.drawControls();
     if (this.paused) this.drawPause();
     if (this.phase === 'prerace') this.drawPreRace();
+  },
+
+  // -------------------------------------------------- motion blur
+  // The scene is rendered into a texture and then drawn again through a
+  // radial (zoom) blur that grows with the speed - the classic speed-blur
+  // you get at the edge of the screen when you are going fast.
+  setupBlur() {
+    if (this.blurRT) return;
+    const w = Math.max(2, Math.round(R3D._gl.width)), h = Math.max(2, Math.round(R3D._gl.height));
+    this.blurRT = new THREE.WebGLRenderTarget(w, h, {
+      minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter,
+      format: THREE.RGBAFormat, depthBuffer: true, stencilBuffer: false,
+    });
+    this.blurMat = new THREE.ShaderMaterial({
+      uniforms: {
+        tDiffuse: { value: this.blurRT.texture },
+        strength: { value: 0 },
+      },
+      vertexShader: [
+        'varying vec2 vUv;',
+        'void main() {',
+        '  vUv = uv;',
+        '  gl_Position = vec4(position.xy, 0.0, 1.0);',
+        '}',
+      ].join('\n'),
+      fragmentShader: [
+        'uniform sampler2D tDiffuse;',
+        'uniform float strength;',
+        'varying vec2 vUv;',
+        'void main() {',
+        '  vec2 dir = vUv - 0.5;',
+        '  float d = length(dir);',
+        '  float amt = strength * smoothstep(0.08, 0.62, d);',
+        '  vec4 sum = vec4(0.0);',
+        '  float wsum = 0.0;',
+        '  for (int i = 0; i < 8; i++) {',
+        '    float t = float(i) / 7.0;',
+        '    float sc = 1.0 - amt * t;',
+        '    float w = 1.0 - t * 0.55;',
+        '    sum += texture2D(tDiffuse, 0.5 + dir * sc) * w;',
+        '    wsum += w;',
+        '  }',
+        '  gl_FragColor = sum / wsum;',
+        '}',
+      ].join('\n'),
+      transparent: true,
+      depthTest: false,
+      depthWrite: false,
+    });
+    this.blurScene = new THREE.Scene();
+    this.blurCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+    this.blurQuad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), this.blurMat);
+    this.blurQuad.frustumCulled = false;
+    this.blurScene.add(this.blurQuad);
+  },
+
+  // how hard the blur should be right now
+  blurAmount() {
+    if (S().settings.motionBlur === 0) return 0;
+    const top = TOPS[R3D.game.carIdx] / 10;
+    const k = (this.speed - top * 0.40) / (top * 0.60);
+    return Math.max(0, Math.min(1, k)) * 0.16;
+  },
+
+  renderScene() {
+    const amt = this.blurAmount();
+    if (amt <= 0.001) {
+      renderer.render(R3D.scene3d, camera);
+      return;
+    }
+    this.setupBlur();
+    const rt = this.blurRT;
+    if (rt.width !== R3D._gl.width || rt.height !== R3D._gl.height) {
+      rt.setSize(Math.max(2, R3D._gl.width), Math.max(2, R3D._gl.height));
+    }
+    renderer.setRenderTarget(rt);
+    renderer.render(R3D.scene3d, camera);
+    renderer.setRenderTarget(null);
+    this.blurMat.uniforms.strength.value = amt;
+    renderer.render(this.blurScene, this.blurCam);
   },
 
   // -------------------------------------------------- prop billboards
@@ -981,27 +1113,29 @@ const raceScene = {
     ui.fillStyle = 'rgba(4,5,7,0.70)';
     ui.fillRect(0, 0, W, H);
     const items = this.pauseItems();
-    const cw = 330, ch = 76 + items.length * 42;
-    const x = Math.round((W - cw) / 2), y = Math.round((H - ch) / 2);
+    const rowH = this.pausePage === 1 ? 30 : 34;
+    const gap = this.pausePage === 1 ? 5 : 8;
+    const cw = 330, ch = (this.pausePage === 1 ? 62 : 76) + items.length * (rowH + gap);
+    const x = Math.round((W - cw) / 2), y = Math.max(8, Math.round((H - ch) / 2));
     plate(x, y, cw, ch, { r: 2, fill: 'rgba(10,12,16,0.94)', topLine: 'rgba(255,255,255,0.10)' });
-    tag(this.pausePage === 1 ? D.lang[107] : 'Paused', W / 2, y + 26, 5, C.accent, 15, 2.2);
+    tag(this.pausePage === 1 ? D.lang[107] : 'Paused', W / 2, y + 24, 5, C.accent, 15, 2.2);
     if (this.pausePage === 1) {
-      tag('Tap a row to change it', W / 2, y + 46, 5, C.faint, 10, 0.9);
+      tag('Tap a row to change it', W / 2, y + 42, 5, C.faint, 10, 0.9);
     }
-    let iy = y + (this.pausePage === 1 ? 62 : 52);
+    let iy = y + (this.pausePage === 1 ? 58 : 50);
     items.forEach((it, i) => {
       const active = i === this.pauseSel;
-      plate(x + 16, iy, cw - 32, 34, {
+      plate(x + 16, iy, cw - 32, rowH, {
         r: 2,
         borderColor: active ? C.accent : 'rgba(255,255,255,0.12)',
         lw: active ? 2 : 1,
         topLine: active ? 'rgba(255,214,110,0.28)' : 'rgba(255,255,255,0.09)',
       });
-      if (active) { ui.fillStyle = C.accent; ui.fillRect(x + 16, iy, 3, 34); }
-      tag(it.label, x + 32, iy + 11, 0, active ? C.accent : C.text, 13, 0.9);
-      if (it.right) tag(it.right, x + cw - 32, iy + 11, 8, C.accent2, 12, 0.9);
-      tapArea('p' + i, x + 16, iy, cw - 32, 34, () => { this.pauseSel = i; this.pausePick(i); });
-      iy += 42;
+      if (active) { ui.fillStyle = C.accent; ui.fillRect(x + 16, iy, 3, rowH); }
+      tag(it.label, x + 30, iy + (rowH - 12) / 2, 0, active ? C.accent : C.text, 12, 0.9);
+      if (it.right) tag(it.right, x + cw - 30, iy + (rowH - 12) / 2, 8, C.accent2, 11, 0.9);
+      tapArea('p' + i, x + 16, iy, cw - 32, rowH, () => { this.pauseSel = i; this.pausePick(i); });
+      iy += rowH + gap;
     });
     if (this.pausePage !== 1) {
       tag('Tap a row  ·  ESC to resume  ·  C for camera', W / 2, y + ch - 20, 5, C.faint, 10, 0.9);

@@ -79,6 +79,20 @@ Plug one in and it just works — the game asks for the first pad it finds.
 | X | Switch camera |
 | d-pad | Move through the menus |
 
+## Graphics
+
+Settings → *Graphics*, or the same three rows in the in-race pause menu.
+
+| Option | What it does |
+|--------|--------------|
+| **Motion blur** | A radial blur that grows with your speed, so the edges of the screen smear as you accelerate. The centre stays sharp. |
+| **Lighting** | Puts a sun on the track: the slopes that face the light are brighter, the ones turned away are darker, and the car picks up the same light. |
+| **Shadows** | Drops a soft contact shadow under the car so it sits on the road instead of floating over it. The shadow fades as the car leaves the ground. |
+
+The lighting is baked into the terrain's vertex colours when the track is built,
+so it costs nothing per frame. Turning a setting on in the pause menu rebuilds
+what it affects straight away — no restart.
+
 ## Cameras
 
 Four viewpoints, switched with the **C** key (during a race or from the pause
@@ -149,6 +163,9 @@ synthesizer (TinySoundFont / TinySynth) as the portrait port.
 - `docs/screenshots/` — reference frames of the finished interface
 - `tools/shotserver.py` — dev server that also accepts `POST /shot` and writes
   the posted PNG to `shots/` (used to inspect rendered frames)
+- `tools/shot.js` — dev tool that drives headless Chrome to the DevTools
+  protocol and screenshots the game in any state
+- `game/_shot.html` — the harness page `shot.js` drives (not part of the game)
 
 ## Known notes
 

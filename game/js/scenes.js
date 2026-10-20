@@ -492,8 +492,8 @@ const hiScoreScene = {
 
 // ==================================================================== SETTINGS
 const settingsScene = {
-  sel: 0, menuMusic: true,
-  enter() { this.sel = 0; },
+  sel: 0, page: 0, menuMusic: true,
+  enter() { this.sel = 0; this.page = 0; },
   items() {
     const st = S().settings;
     return [
@@ -503,11 +503,29 @@ const settingsScene = {
       { label: 'Title song', right: st.titleSong === 1 ? 'Tinysynth' : 'Tinysound' },
       { label: 'Tilt steering', right: st.tilt === 1 ? 'on' : 'off' },
       { label: 'On-screen buttons', right: st.buttons === 0 ? 'off' : 'on' },
+      { label: 'Graphics', right: '' },
       { label: D.lang[52], right: '' },
+    ];
+  },
+  // the graphics sub-page
+  gfxItems() {
+    const st = S().settings;
+    return [
+      { label: 'Motion blur', right: st.motionBlur === 0 ? 'off' : 'on' },
+      { label: 'Lighting', right: st.lighting === 0 ? 'off' : 'on' },
+      { label: 'Shadows', right: st.shadows === 0 ? 'off' : 'on' },
     ];
   },
   pick(i) {
     const st = S().settings;
+    if (this.page === 1) {
+      if (i === 0) st.motionBlur = (st.motionBlur + 1) % 2;
+      else if (i === 1) st.lighting = (st.lighting + 1) % 2;
+      else st.shadows = (st.shadows + 1) % 2;
+      R3D.persist();
+      if (R3D.raceScene && R3D.raceScene.rebuildGraphics) R3D.raceScene.rebuildGraphics();
+      return;
+    }
     if (i === 0) { st.sound = (st.sound + 1) % 3; if (st.sound === 0) AudioSys.stopMusic(); }
     else if (i === 1) st.units = (st.units + 1) % 2;
     else if (i === 2) st.auto = (st.auto + 1) % 2;
@@ -524,20 +542,44 @@ const settingsScene = {
         });
       }
     } else if (i === 5) st.buttons = (st.buttons + 1) % 2;
+    else if (i === 6) { this.page = 1; this.sel = 0; return; }
     else { R3D.saveReset(); R3D.toast('Progress reset'); }
     R3D.persist();
   },
   update() {
-    const n = this.items().length;
+    const items = this.page === 1 ? this.gfxItems() : this.items();
+    const n = items.length;
     if (wasPressed('DOWN')) this.sel = (this.sel + 1) % n;
     if (wasPressed('UP')) this.sel = (this.sel + n - 1) % n;
     if (wasPressed('OK')) this.pick(this.sel);
+    if (wasPressed('BACK')) {
+      if (this.page === 1) { this.page = 0; this.sel = 6; }
+      else R3D.setScene(titleScene);
+    }
   },
   draw() {
     R3D.drawBackground(R3D.uiTheme());
+    if (this.page === 1) {
+      header('Graphics', { back: () => { this.page = 0; this.sel = 6; } });
+      const items = this.gfxItems();
+      menuColumn(items, (i) => { this.sel = i; this.pick(i); }, { x: COL_X, y: 96, h: 40, gap: 8, sel: this.sel });
+      panel(PAD, 84, 300, 196, { r: 2, fill: PLATE_SOFT });
+      tag('Graphics', PAD + 18, 98, 0, C.accent, 12, 2);
+      const tips = [
+        'Motion blur smears the edges of the',
+        'screen when you pick up speed.',
+        '',
+        'Lighting puts a sun on the hills and',
+        'the car.',
+        '',
+        'Shadows drop the car onto the road.',
+      ];
+      tips.forEach((t, i) => text(t, PAD + 18, 128 + i * 21, 0, C.dim, 12, '500'));
+      return;
+    }
     header(D.lang[107], { back: 'title' });
     const items = this.items().map((it) => ({ label: it.label, right: it.right }));
-    menuColumn(items, (i) => { this.sel = i; this.pick(i); }, { sel: this.sel, y: 72, h: 34, gap: 6 });
+    menuColumn(items, (i) => { this.sel = i; this.pick(i); }, { sel: this.sel, y: 68, h: 32, gap: 5 });
     // a short "how to play" card on the empty left half
     panel(PAD, 82, 300, 182, { r: 2, fill: PLATE_SOFT });
     tag('How to play', PAD + 18, 96, 0, C.accent, 12, 2);

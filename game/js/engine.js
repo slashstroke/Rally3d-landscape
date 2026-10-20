@@ -85,9 +85,13 @@ function synGeometry(m) {
   return g;
 }
 
-R3D.buildCar = function (carIdx) {
+R3D.buildCar = function (carIdx, lit) {
   const grp = new THREE.Group();
-  const mat = new THREE.MeshBasicMaterial({ map: TEX['car' + (carIdx + 1)] });
+  // With lighting on the body picks up the sun; the texture is painted, so the
+  // light only adds form, it does not repaint the car.
+  const mat = lit
+    ? new THREE.MeshLambertMaterial({ map: TEX['car' + (carIdx + 1)] })
+    : new THREE.MeshBasicMaterial({ map: TEX['car' + (carIdx + 1)] });
   const body = new THREE.Mesh(synGeometry(D.meshes['car' + (carIdx + 1)]), mat);
   grp.add(body);
   const wmat = new THREE.MeshBasicMaterial({ map: TEX.wheel });
@@ -101,6 +105,44 @@ R3D.buildCar = function (carIdx) {
     grp.userData.wheels.push(w);
   }
   return grp;
+};
+
+// The sun and the fill light for the car.
+R3D.buildLights = function (scene) {
+  const sun = new THREE.DirectionalLight(0xfff2d8, 0.5);
+  sun.position.set(0.40, 0.82, 0.41).multiplyScalar(30);
+  const ambient = new THREE.AmbientLight(0xffffff, 0.55);
+  scene.add(sun);
+  scene.add(ambient);
+  return { sun: sun, ambient: ambient };
+};
+
+// A soft blob under the car - the contact shadow. A real shadow map over the
+// whole track ribbon would be far too heavy for a phone, and a contact
+// shadow is what actually sells the car sitting on the road.
+R3D.buildShadow = function () {
+  const c = document.createElement('canvas');
+  c.width = c.height = 64;
+  const g = c.getContext('2d');
+  const rad = g.createRadialGradient(32, 32, 2, 32, 32, 31);
+  rad.addColorStop(0, 'rgba(0,0,0,0.85)');
+  rad.addColorStop(0.55, 'rgba(0,0,0,0.42)');
+  rad.addColorStop(1, 'rgba(0,0,0,0)');
+  g.fillStyle = rad;
+  g.fillRect(0, 0, 64, 64);
+  const tex = new THREE.CanvasTexture(c);
+  tex.minFilter = THREE.LinearFilter;
+  tex.generateMipmaps = false;
+  const mat = new THREE.MeshBasicMaterial({
+    map: tex, transparent: true, depthWrite: false, opacity: 0.55,
+  });
+  const mesh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), mat);
+  // yaw first, then lay it flat - the order matters or the blob ends up on
+  // its edge
+  mesh.rotation.order = 'YXZ';
+  mesh.rotation.set(-Math.PI / 2, 0, 0);
+  mesh.renderOrder = 2;
+  return mesh;
 };
 
 // The four cars are different shapes - the "Azure racer" is longer and has a
@@ -129,7 +171,13 @@ R3D.carAnchors = function (carIdx) {
 //  - cross-section points H[0..7]: left side -nv[0,2,4,6], right side +pv[6,4,2,0]
 //    (H0/H7 outermost terrain edge, H3/H4 road edges at profile col6)
 //  - strip k spans H[k]..H[k+1]; strip 3 = road
-R3D.buildTrack = function (track) {
+// The sun the terrain is lit by (direction it comes FROM), and the option
+// to bake that into the track's vertex colours.
+const SUN = [0.40, 0.82, 0.41];
+R3D.SUN = SUN;
+
+R3D.buildTrack = function (track, opts) {
+  const LIGHT = !(opts && opts.lighting === false);
   const tiles = track.tiles;
   const theme = track.theme;
   const P = D.profiles;
@@ -309,10 +357,22 @@ R3D.buildTrack = function (track) {
         // variant j station 0 carries variant j-1 station 2, so brightness is
         // continuous along the whole track AND across tile boundaries.
         const brA = varr[q][sec], brB = varr[q + 1][sec];
-        colors.push(brA[0] / 255, brA[0] / 255, brA[0] / 255,
-                    brA[1] / 255, brA[1] / 255, brA[1] / 255,
-                    brB[0] / 255, brB[0] / 255, brB[0] / 255,
-                    brB[1] / 255, brB[1] / 255, brB[1] / 255);
+        // A sun term: the slopes that face the light are brighter, the ones
+        // turned away are darker. It is baked into the vertex colours, so the
+        // terrain gets form without any per-frame lighting cost.
+        let la = 1, lb = 1;
+        if (LIGHT) {
+          const nx = (Ba.y - Aa.y) * (Ab.z - Aa.z) - (Ba.z - Aa.z) * (Ab.y - Aa.y);
+          const ny = (Ba.z - Aa.z) * (Ab.x - Aa.x) - (Ba.x - Aa.x) * (Ab.z - Aa.z);
+          const nz = (Ba.x - Aa.x) * (Ab.y - Aa.y) - (Ba.y - Aa.y) * (Ab.x - Aa.x);
+          const len = Math.sqrt(nx * nx + ny * ny + nz * nz) || 1;
+          const d = Math.abs((nx * SUN[0] + ny * SUN[1] + nz * SUN[2]) / len);
+          la = lb = 0.62 + 0.42 * d;
+        }
+        colors.push(brA[0] / 255 * la, brA[0] / 255 * la, brA[0] / 255 * la,
+                    brA[1] / 255 * la, brA[1] / 255 * la, brA[1] / 255 * la,
+                    brB[0] / 255 * lb, brB[0] / 255 * lb, brB[0] / 255 * lb,
+                    brB[1] / 255 * lb, brB[1] / 255 * lb, brB[1] / 255 * lb);
         // u per section: terrain strips keep texel 31 on the road-side vertex;
         // road strip: right edge texel 1, left edge texel 31 (r.java s4/s5 rule)
         const cell = ncols[sec] * 32;
