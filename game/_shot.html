@@ -95,6 +95,21 @@
       sc.pauseSel = num('sel', 0);
       await wait(400);
     }
+    // exercise the live graphics toggle: flip a setting and rebuild
+    if (q.get('toggle')) {
+      const which = q.get('toggle');
+      R.setScene(R.settingsScene);
+      await waitScene(R.settingsScene);
+      const ss = R.currentScene();
+      if (which === 'lighting') { ss.page = 1; ss.sel = 1; ss.pick(1); }
+      else if (which === 'shadow') { ss.page = 1; ss.sel = 2; ss.pick(2); }
+      else { ss.page = 1; ss.sel = 0; ss.pick(0); }
+      R.setScene(R.raceScene);
+      await waitScene(R.raceScene);
+      const sc2 = R.currentScene();
+      sc2.phase = 'racing'; sc2.goT = 0; sc2.timeT = 300; sc2.speed = num('speed', 3);
+      await wait(600);
+    }
     document.title = 'ready';
   }).catch((e) => { document.title = 'error: ' + e.message + ' | same=' + (window.R3D.currentScene() === window.R3D.raceScene) + ' | cur=' + (window.R3D.currentScene() ? Object.keys(window.R3D).filter(k => window.R3D[k] === window.R3D.currentScene()).join(',') : 'null') + ' | fn=' + (window.R3D.raceScene && typeof window.R3D.raceScene.setCamera) + ' | race=' + (typeof (window.R3D && window.R3D.raceScene)) + ' | ' + (window.__errs || []).join(' ; '); });
 </script>
