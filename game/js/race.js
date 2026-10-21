@@ -16,13 +16,14 @@ const ui = document.getElementById('ui').getContext('2d');
 const renderer = R3D._renderer, camera = R3D._camera;
 const S = () => R3D.saveObj;
 const C = R3D.colors;
-const text = R3D.text, tag = R3D.tag, panel = R3D.panel, plate = R3D.plate,
-      checkers = R3D.checkers, roundRect = R3D.roundRect, measure = R3D.measure,
+const text = R3D.text, tag = R3D.tag, plate = R3D.plate,
+      roundRect = R3D.roundRect,
       wasPressed = R3D.wasPressed, AudioSys = R3D.audio,
       tapArea = R3D.tapArea, holdArea = R3D.holdArea;
 
 const SPEED_K = R3D.SPEED_K;
-const TOPS = R3D.STAT_TOP;
+// read lazily: scenes.js defines the car stats
+const topSpeed = (car) => R3D.STAT_TOP[car] / 10;
 const KMH = 15, MPH = 9.5;
 const THEMES = R3D.themeColors;
 const textMid = R3D.textMid, tagMid = R3D.tagMid;
@@ -46,11 +47,6 @@ const CAMS = {
     label: 'Chase', off: [0, 3.2, -9.0], look: [0, 1.4, 8], lag: 25 / 6,
   },
   hood: {
-    // Placed from the car's own geometry: just above and behind the rear
-    // edge of the bonnet, looking along it. The pitch is set so the bottom
-    // of the frame lands exactly on that edge - the bodywork then runs off
-    // the bottom of the screen with no gap, and the front wheels (which
-    // sit below the bonnet line) stay out of shot.
     label: 'Hood', off: [0, 1.51, 1.03], look: [0, 2.47, 17.03], lag: 25 / 2.6,
     rigid: true, clear: 0.45,
   },
@@ -64,11 +60,7 @@ const CAMS = {
 };
 const CAM_ORDER = ['chase', 'hood', 'bumper', 'top'];
 
-// The on-car cameras follow the shape of the car being driven. The hood
-// camera sits just behind the front bumper and a little above its top edge:
-// the car's nose then fills the bottom of the frame with no gap of road
-// showing under it, the front wheels are far behind the camera, and the
-// camera is below the line of the bonnet.
+// The on-car cameras follow the shape of the car being driven.
 function fitCamerasToCar(carIdx) {
   const a = R3D.carAnchors(carIdx);
   const hy = a.frontTop + 0.04, hz = a.frontZ - 0.23;
@@ -78,16 +70,10 @@ function fitCamerasToCar(carIdx) {
   CAMS.bumper.look = [0, 0.34, a.noseZ + 0.20 + 19];
 }
 
-// camera framing for the landscape frame. With a 60 degree vertical lens and
-// the camera 9 units back, the world keeps EXACTLY the original's pixel
-// scale (34.6 px per world unit at the car), so the track, the tree walls
-// and the distant scenery read exactly like the portrait original - only the
-// frame is wider, which is what a landscape phone screen gives us.
-const FOV = 60;                  // vertical field of view (degrees)
+// camera framing for the landscape frame (keeps the original's pixel scale)
+const FOV = 60;
 const HALF_FOV = FOV * Math.PI / 360;
 const K0 = 2 * Math.tan(HALF_FOV);
-// the 2D prop billboards are sized in screen pixels; this keeps them the same
-// size relative to the 3D world as in the 240x320 portrait build
 const PROP_K = (H / K0) / (320 / (2 * Math.tan(30 * Math.PI / 180)));
 const BG_SCALE = R3D.PIX;
 const BG_SCROLL = (W / (2 * Math.atan(Math.tan(HALF_FOV) * (W / H)) * 180 / Math.PI)) / BG_SCALE;
@@ -119,6 +105,11 @@ function makeSpriteGeos(key, spr) {
   return geos;
 }
 
+const PLACES = ['1st', '2nd', '3rd', '4th', '5th'];
+
+// the HUD row
+const HUD_Y = 10, HUD_H = 34, HUD_GAP = 4;
+
 const raceScene = {
   phase: 'prerace',   // prerace | countdown | racing | done
   cd: 0, cdN: 0, goT: 0,
@@ -133,13 +124,15 @@ const raceScene = {
   azCnt: 0, cI: 0, coastT: 0, finishSeg: 0,
   doneT: 0, orbitFrom: 0,
   splitText: '', splitColor: '#fff', splitT: 0,
-  paused: false, pauseSel: 0, pausePage: 0,
+  paused: false, pauseSel: 0, pausePage: 0, pauseT: 0,
+  ai: null, mpPlace: 0,
 
   enter() {
     const ti = R3D.game.trackIdx;
     this.track = D.tracks[ti];
     this.theme = this.track.theme;
-    if (this._propGeos) for (const key in this._propGeos) for (const g of this._propGeos[key]) g.dispose();
+    // the previous race's 3D (prop geometry included) was freed by the scene
+    // machine when the shutter closed
     this._propGeos = null;
     const gfx = S().settings;
     this.world = R3D.buildTrack(this.track, { lighting: gfx.lighting !== 0 });
@@ -149,9 +142,9 @@ const raceScene = {
     this.car = R3D.buildCar(R3D.game.carIdx, gfx.lighting !== 0, gfx.shadows !== 0);
     sc.add(this.car);
     this.lights = R3D.buildLights(sc);
+    this.setupAI(sc);
     this.setLightLevel(gfx.lighting !== 0);
     this.buildPropBillboards(sc);
-    this.setupAI(sc);
     R3D.scene3d = sc;
     camera.aspect = W / H;
     camera.updateProjectionMatrix();
@@ -159,13 +152,14 @@ const raceScene = {
     this.phase = 'prerace';
     this.paused = false; this.pauseSel = 0; this.pausePage = 0;
     this.timeT = 0; this.cpNext = 0; this.finished = false;
-    this.splitT = 0; this.goT = 0;
+    this.splitT = 0; this.goT = 0; this.cd = 0; this.cdN = 0;
     this.splitVal = ''; this.splitGood = false;
+    this.wrongWay = false; this.mpPlace = 0;
     this.checkpoints = this.track.checkpoints;
     this.finishIdx = this.track.finish;
     this.finishSeg = this.track.finish * 3 + 2;
     this.azCnt = 0; this.cI = 0; this.coastT = 0;
-    this.doneT = 0; this.orbitFrom = 0;
+    this.doneT = 0; this.orbitFrom = 0; this.finishCam = null;
     this.camMode = CAMS[S().settings.camera] ? S().settings.camera : 'chase';
     fitCamerasToCar(R3D.game.carIdx);
     this.horizon = H / 2;
@@ -192,21 +186,26 @@ const raceScene = {
     this.air = 0; this.airT = 0;
   },
 
+  startCountdown() {
+    AudioSys.sfx('plink1');
+    this.phase = 'countdown'; this.cd = 0; this.cdN = 0;
+  },
+
   update(dt) {
-    if (wasPressed('CAM')) this.cycleCamera();
+    if (wasPressed('CAM') && this.phase !== 'done') this.cycleCamera(!this.paused);
     if (this.paused) { this.pauseInput(); return; }
     if ((this.phase === 'racing' || this.phase === 'countdown') &&
         (wasPressed('PAUSE') || wasPressed('BACK'))) {
-      this.paused = true; this.pauseSel = 0; this.pausePage = 0;
-      AudioSys.stopMusic();
+      this.pause();
       return;
     }
+    // timers run on real time, not on frame count
+    if (this.splitT > 0) this.splitT -= dt;
+    if (this.goT > 0) this.goT -= dt;
+
     if (this.phase === 'prerace') {
-      if (wasPressed('OK') || wasPressed('UP')) {
-        AudioSys.sfx('plink1');
-        this.phase = 'countdown'; this.cd = 0; this.cdN = 0;
-      }
-      if (wasPressed('BACK')) { R3D.clearScene3d(); R3D.setScene(R3D.carSelectSceneRef); }
+      if (wasPressed('OK') || wasPressed('UP')) this.startCountdown();
+      else if (wasPressed('BACK')) R3D.setScene(R3D.carSelectSceneRef);
       this.updateCamera(dt);
       return;
     }
@@ -227,7 +226,6 @@ const raceScene = {
       return;
     }
     if (this.phase === 'racing') {
-      if (this.goT > 0) this.goT -= dt;
       this.step(dt);
       this.updateAI(dt);
       this.updateCamera(dt);
@@ -241,62 +239,88 @@ const raceScene = {
       } else {
         R3D.setScene(R3D.resultsScene);
       }
+      this.updateAI(dt);
       this.updateCamera(dt);
     }
   },
 
-  // ---- pause menu (modern card) ----
+  // ---- pause -----------------------------------------------------------------
+  pause() {
+    if (this.paused) return;
+    this.paused = true;
+    this.pausePage = 0;
+    this.pauseSel = 0;
+    this.pauseT = R3D.clock;
+    AudioSys.stopMusic();
+    if (R3D.releaseAllHolds) R3D.releaseAllHolds();
+  },
+  resumeRace() {
+    this.paused = false;
+    if (this.phase === 'racing') AudioSys.play('title', true, 0.85);
+  },
   pauseItems() {
-    if (this.pausePage === 1) {
-      const st = S().settings;
-      return [
-        { label: 'Camera', right: (CAMS[this.camMode] || CAMS.chase).label },
-        { label: 'Touch controls', right: st.buttons === 0 ? 'hidden' : 'shown' },
-        { label: 'Motion blur', right: st.motionBlur === 0 ? 'off' : 'on' },
-        { label: 'Lighting', right: st.lighting === 0 ? 'off' : 'on' },
-        { label: 'Shadows', right: st.shadows === 0 ? 'off' : 'on' },
-        { label: 'Auto acceleration', right: st.auto === 1 ? 'on' : 'off' },
-        { label: 'Speed units', right: [D.lang[66], D.lang[67]][st.units] },
-      ];
-    }
     return [
-      { label: D.lang[94] },            // Continue
-      { label: D.lang[107] },           // Settings
+      { label: D.lang[94] },        // Continue
       { label: 'Restart race' },
+      { label: D.lang[107] },       // Settings
       { label: 'Quit race' },
+    ];
+  },
+  pauseSettings() {
+    const st = S().settings;
+    return [
+      { label: 'Camera', right: (CAMS[this.camMode] || CAMS.chase).label },
+      { label: 'Touch buttons', toggle: st.buttons !== 0 },
+      { label: 'Auto accelerate', toggle: st.auto === 1 },
+      { label: 'Speed units', right: st.units === 1 ? 'Mph' : 'Km/h' },
+      { label: 'Motion blur', toggle: st.motionBlur !== 0 },
+      { label: 'Lighting', toggle: st.lighting !== 0 },
+      { label: 'Shadows', toggle: st.shadows !== 0, disabled: st.lighting === 0 },
+      { label: 'Sound', right: ['Off', 'Low', 'Loud'][st.sound] },
     ];
   },
   pausePick(i) {
     if (this.pausePage === 1) {
       const st = S().settings;
-      if (i === 0) this.cycleCamera();
-      else if (i === 1) st.buttons = (st.buttons + 1) % 2;
-      else if (i === 2) st.motionBlur = (st.motionBlur + 1) % 2;
-      else if (i === 3) st.lighting = (st.lighting + 1) % 2;
-      else if (i === 4) st.shadows = (st.shadows + 1) % 2;
-      else if (i === 5) st.auto = (st.auto + 1) % 2;
-      else st.units = (st.units + 1) % 2;
+      if (i === 8) { this.pausePage = 0; this.pauseSel = 2; this.pauseT = R3D.clock; return; }
+      if (i === 0) this.cycleCamera(false);
+      else if (i === 1) st.buttons = st.buttons === 0 ? 1 : 0;
+      else if (i === 2) st.auto = st.auto === 1 ? 0 : 1;
+      else if (i === 3) st.units = st.units === 1 ? 0 : 1;
+      else if (i === 4) st.motionBlur = st.motionBlur === 0 ? 1 : 0;
+      else if (i === 5) { st.lighting = st.lighting === 0 ? 1 : 0; this.rebuildGraphics(); }
+      else if (i === 6) { if (st.lighting === 0) return; st.shadows = st.shadows === 0 ? 1 : 0; this.setLightLevel(true); }
+      else if (i === 7) { st.sound = (st.sound + 1) % 3; if (st.sound === 0) AudioSys.stopMusic(); }
       R3D.persist();
-      if (i >= 2 && i <= 4) this.rebuildGraphics();
       return;
     }
     if (i === 0) this.resumeRace();
-    else if (i === 1) { this.pausePage = 1; this.pauseSel = 0; }
-    else if (i === 2) {
-      this.paused = false;
-      R3D.clearScene3d();
-      R3D.setScene(R3D.raceScene);
-    } else {
-      this.paused = false;
-      R3D.clearScene3d();
-      R3D.setScene(R3D.newGameScene);
+    else if (i === 1) { this.paused = false; R3D.setScene(raceScene); }
+    else if (i === 2) { this.pausePage = 1; this.pauseSel = 0; this.pauseT = R3D.clock; }
+    else { this.paused = false; R3D.setScene(R3D.trackSelectScene); }
+  },
+  pauseInput() {
+    if (this.pausePage === 1) {
+      const s = this.pauseSel;
+      if (wasPressed('DOWN')) this.pauseSel = s === 8 ? 0 : (s % 4 === 3 ? 8 : s + 1);
+      if (wasPressed('UP')) this.pauseSel = s === 8 ? 3 : (s % 4 === 0 ? 8 : s - 1);
+      if ((wasPressed('LEFT') || wasPressed('RIGHT')) && s < 8) this.pauseSel = s < 4 ? s + 4 : s - 4;
+      if (wasPressed('BACK')) { this.pausePage = 0; this.pauseSel = 2; this.pauseT = R3D.clock; return; }
+      if (wasPressed('OK')) this.pausePick(this.pauseSel);
+      return;
     }
+    const n = this.pauseItems().length;
+    if (wasPressed('DOWN')) this.pauseSel = (this.pauseSel + 1) % n;
+    if (wasPressed('UP')) this.pauseSel = (this.pauseSel + n - 1) % n;
+    if (wasPressed('BACK') || wasPressed('PAUSE')) { this.resumeRace(); return; }
+    if (wasPressed('OK')) this.pausePick(this.pauseSel);
   },
 
   // ---- camera ----
-  cycleCamera() {
+  cycleCamera(announce) {
     const i = CAM_ORDER.indexOf(this.camMode);
     this.setCamera(CAM_ORDER[(i + 1) % CAM_ORDER.length]);
+    if (announce) R3D.toast('Camera: ' + CAMS[this.camMode].label, 1200, 'cam');
   },
   setCamera(mode) {
     if (!CAMS[mode]) return;
@@ -306,26 +330,11 @@ const raceScene = {
     S().settings.camera = mode;
     R3D.persist();
   },
-  pauseInput() {
-    const n = this.pauseItems().length;
-    if (wasPressed('DOWN')) this.pauseSel = (this.pauseSel + 1) % n;
-    if (wasPressed('UP')) this.pauseSel = (this.pauseSel + n - 1) % n;
-    if (wasPressed('BACK')) {
-      if (this.pausePage === 1) { this.pausePage = 0; this.pauseSel = 1; return; }
-      this.resumeRace();
-      return;
-    }
-    if (wasPressed('OK')) this.pausePick(this.pauseSel);
-  },
-  resumeRace() {
-    this.paused = false;
-    if (this.phase === 'racing') AudioSys.play('title', true, 0.85);
-  },
 
   // -------------------------------------------------- physics (original d(boolean))
   step(dt) {
     const car = R3D.game.carIdx;
-    const top = TOPS[car] / 10;
+    const top = topSpeed(car);
     const F5 = dt * SPEED_K;
     if (this.air === 4) this.airT += dt; else this.airT = 0;
     const frozen = this.airT >= 0.05;
@@ -336,10 +345,11 @@ const raceScene = {
 
     // steering — the original's 1.5 accumulate / 2.5 return, clamped to ±6.
     // Tilt steering feeds an ANALOG target instead of the digital left/right.
-    const tilt = (R3D.tilt && R3D.tilt.enabled) ? R3D.tilt.value : 0;
+    const tilt = (R3D.tilt && R3D.tilt.enabled && !this.finished) ? R3D.tilt.value : 0;
     if (!frozen) {
       if (Math.abs(tilt) > 0.06 && !left && !right) {
-        const target = tilt * 6;
+        // like the buttons, tilt only turns the car once it is rolling
+        const target = this.speed > 0.2 ? tilt * 6 : 0;
         this.steer += (target - this.steer) * Math.min(1, dt * 8);
       } else if (left && this.speed > 0.2) {
         this.steer -= 1.5 * F5;
@@ -503,8 +513,7 @@ const raceScene = {
         if (this.sus[n] <= g.y - this.gJ[n]) this.sus[n] = g.y - this.gJ[n];
       } else {
         this.gH[n] = f4;
-        // downhill stick-assist (unchanged from the portrait build): glue a
-        // slightly falling wheel to ground that descends faster than it falls
+        // downhill stick-assist (unchanged from the portrait build)
         const gap = f4 - g.y;
         const groundRate = g.y - this.gJ[n];
         if (this.sus[n] < 0 && gap < 0.6 && groundRate < -0.02 && this.sus[n] > groundRate) {
@@ -522,8 +531,8 @@ const raceScene = {
     this.air = 4 - touched;
     if (noGround === 4) return;
     const f = snap ? 1 : 1 - Math.pow(0.5, dt * 25);
-    let targetRoll = (this.gH[3] - this.gH[2]) * 6;
-    let targetPitch = (this.gH[2] + this.gH[3] - this.gH[0] - this.gH[1]) * 4;
+    const targetRoll = (this.gH[3] - this.gH[2]) * 6;
+    const targetPitch = (this.gH[2] + this.gH[3] - this.gH[0] - this.gH[1]) * 4;
     this.roll += (targetRoll - this.roll) * f;
     if (this.roll > 45) this.roll = 45; if (this.roll < -45) this.roll = -45;
     this.pitch += (targetPitch - this.pitch) * f;
@@ -555,7 +564,6 @@ const raceScene = {
       const diff = Math.round(this.timeT - target);
       this.splitText = (diff >= 0 ? '+' : '-') + R3D.fmtTime(Math.abs(diff));
       this.splitColor = diff >= 0 ? C.red : C.green;
-      // the compact reading in the HUD data panel
       this.splitVal = (diff >= 0 ? '+' : '-') + (Math.abs(diff) / 10).toFixed(1);
       this.splitGood = diff < 0;
       this.splitT = 2.5;
@@ -568,46 +576,52 @@ const raceScene = {
       this.coastT = 2.4;
       this.doneT = 2.4;
       this.orbitFrom = this.camYaw;
-      // the victory shot is always from behind the car
       this.finishCam = 'chase';
+      this.mpPlace = this.ai ? (this.ai.done ? 2 : 1) : 0;
       AudioSys.stopMusic();
       AudioSys.sfx('goal');
-      this.buildResults();
+      this.buildResults(false);
     }
     if (!this.finished && this.timeT >= 3000) {
       this.finished = true;
       this.phase = 'done';
       this.coastT = 0.01;
       this.doneT = 0;
+      this.mpPlace = this.ai ? 2 : 0;
       this.buildResults(true);
     }
   },
 
+  // The leaderboard, medals, unlocks and the championship.
+  // The championship only moves on when the current championship track is
+  // raced and a medal is won (which is also what unlocks the next track).
   buildResults(timeUp) {
     const ti = R3D.game.trackIdx;
     const t10 = Math.round(this.timeT);
     const sv = S();
+    const prevBest = sv.scores[ti][0];
     let rank = 5;
-    for (let i = 4; i >= 0; i--) {
-      if (t10 < sv.scores[ti][i]) {
-        if (i < 4) { sv.scores[ti][i + 1] = sv.scores[ti][i]; sv.names[ti][i + 1] = sv.names[ti][i]; }
-        sv.scores[ti][i] = t10; sv.names[ti][i] = sv.name || D.lang[68];
-        rank = i;
+    if (!timeUp) {
+      for (let i = 4; i >= 0; i--) {
+        if (t10 < sv.scores[ti][i]) {
+          if (i < 4) { sv.scores[ti][i + 1] = sv.scores[ti][i]; sv.names[ti][i + 1] = sv.names[ti][i]; }
+          sv.scores[ti][i] = t10; sv.names[ti][i] = sv.name || D.lang[68];
+          rank = i;
+        }
       }
     }
     const medalNames = [D.lang[28], D.lang[60], D.lang[8]];
-    const rankNames = [D.lang[25], D.lang[55], D.lang[69]];
-    let headline, medalText = '', toasts = [];
+    const unlocks = [];
+    let headline, sub = '';
     if (timeUp) {
-      headline = D.lang[72];
+      headline = D.lang[72];                       // Time is up
     } else if (rank <= 2) {
       headline = medalNames[rank];
-      medalText = rankNames[rank];
       if (sv.medals[ti] > rank) sv.medals[ti] = rank;
       for (let k = 1; k < 12; k++) {
         if (sv.medals[k] === 4 && sv.medals[k - 1] <= 2) {
           sv.medals[k] = 3;
-          toasts.push(D.lang[85] + ' ' + D.tracks[k].name);
+          unlocks.push(D.lang[85] + ' ' + D.tracks[k].name);
         }
       }
       const need = [-1, 4, 8, 12], req = [-1, 2, 1, 0];
@@ -617,38 +631,50 @@ const raceScene = {
         for (let k = 0; k < need[c]; k++) if (sv.medals[k] > req[c]) { blocked = true; break; }
         if (!blocked) {
           sv.cars[c] = 0;
-          toasts.push(D.lang[14] + ' ' + D.cars[c].name);
+          unlocks.push(D.lang[14] + ' ' + D.cars[c].name);
         }
       }
-    } else if (rank === 5) {
-      headline = D.lang[29];
+    } else if (rank <= 4) {
+      headline = D.lang[29];                       // Good job!
     } else {
-      headline = D.lang[42];
+      headline = D.lang[42];                       // Sorry, no medal
     }
-    const best = sv.scores[ti][0];
+    if (!timeUp && rank <= 4) sub = PLACES[rank] + ' on the leaderboard';
+
+    let champText = '', champion = false;
+    if (sv.champ > 12) sv.champ = 12;              // repair saves from the old bug
+    if (R3D.game.mode === 'champ' && !timeUp && sv.champ < 12 && ti === sv.champ) {
+      if (rank <= 2) {
+        sv.champ++;
+        if (sv.champ === 12) { champion = true; headline = D.lang[16]; }
+        else champText = 'Championship race ' + sv.champ + ' of 12 complete';
+      } else {
+        champText = 'Win a medal to move the championship on';
+      }
+    }
+
+    let mpText = '';
+    if (this.ai) mpText = this.mpPlace === 1 ? 'You beat the opponent' : 'The opponent got there first';
+
     R3D.game.results = {
-      headline, medalText, toasts, time: t10,
-      bestText: rank === 0 ? '' : (D.lang[32].replace(':', '') + ' ' + R3D.fmtTime(best)),
+      headline, sub, medalText: sub,
+      time: t10, prevBest,
+      record: !timeUp && rank === 0,
+      medal: (!timeUp && rank <= 2) ? rank : -1,
+      rank, unlocks, toasts: unlocks,
+      champText, champion, mpText, mpPlace: this.mpPlace,
+      timeUp: !!timeUp, trackIdx: ti,
+      bestText: rank === 0 ? '' : ('Best ' + R3D.fmtTime(sv.scores[ti][0])),
     };
-    if (R3D.game.mode === 'champ' && !timeUp && R3D.game.raceIdx === (sv.champ % 12)) {
-      sv.champ = (sv.champ + 1);
-      if (sv.champ >= 12) R3D.game.results.headline = D.lang[16];
-    }
     R3D.persist();
   },
 
   // -------------------------------------------------- camera
-  // The chase cam keeps the original's trailing yaw (the car visibly leads
-  // the camera into a corner). The other viewpoints are mounted on the car
-  // and barely lag at all.
   updateCamera(dt) {
     const done = this.phase === 'done' && this.doneT > 1 && this.coastT > 0;
-    // after the finish the camera drops back to the chase view: sitting on
-    // the bonnet while the car coasts to a stop looks broken
     const mode = (this.phase === 'done' && this.finishCam) ? CAMS[this.finishCam] : (CAMS[this.camMode] || CAMS.chase);
 
     if (done) {
-      // the finish shot: swing around to the front of the car
       const t = 1 - this.coastT / this.doneT;
       const e = t * t * (3 - 2 * t);
       const target = this.yaw + 180;
@@ -659,21 +685,15 @@ const raceScene = {
     const rad = this.camYaw * Math.PI / 180;
     const cy = Math.cos(rad), sy = Math.sin(rad);
 
-    // camera frame -> world. The car's own frame: +X is the car's right,
-    // +Z is the direction it is travelling (the wheel offsets use the
-    // opposite convention, with +Z meaning "rear", so they must not be
-    // reused here).
     const toWorld = (lx, ly, lz) => ({
       x: this.pos.x + lx * cy + lz * sy,
       y: this.pos.y + ly,
       z: this.pos.z + lx * sy - lz * cy,
     });
 
-    let off = mode.off, look = mode.look;
+    const off = mode.off, look = mode.look;
     const p = toWorld(off[0], off[1], off[2]);
     if (mode.rigid) {
-      // a camera bolted to the car: no vertical lag at all, and it is lifted
-      // if the road underneath rises above it (a crest, a jump)
       this.camY = p.y;
       if (mode.clear) {
         const g = R3D.sampleGround(this.world, p.x, p.z, this.segHint);
@@ -701,12 +721,10 @@ const raceScene = {
     this.placeCar();
   },
 
-  // the 2D background is aligned to the horizon, so the horizon has to follow
-  // whichever camera is active
   setHorizonFromLook() {
     const d = camera.getWorldDirection(this._dirV || (this._dirV = new THREE.Vector3()));
-    const pitch = Math.asin(Math.max(-1, Math.min(1, d.y)));   // negative = looking down
-    if (pitch < -1.2) { this.horizon = null; return; }          // looking straight down
+    const pitch = Math.asin(Math.max(-1, Math.min(1, d.y)));
+    if (pitch < -1.2) { this.horizon = null; return; }
     this.horizon = H / 2 - (H / 2) * Math.tan(-pitch) / Math.tan(HALF_FOV);
   },
 
@@ -720,12 +738,9 @@ const raceScene = {
     );
   },
 
-  // the contact shadow follows the car and fades as it leaves the ground
   updateShadow() {
     if (!this.lights) return;
     const sun = this.lights.sun;
-    // the shadow box follows the car, so the map only has to cover the road
-    // right around it instead of the whole track
     sun.target.position.set(this.pos.x, this.pos.y, this.pos.z);
     sun.position.set(
       this.pos.x + R3D.SUN[0] * 22,
@@ -738,6 +753,7 @@ const raceScene = {
   setLightLevel(on) {
     if (!this.lights) return;
     const st = S().settings;
+    on = on && st.lighting !== 0;
     const shadows = on && st.shadows !== 0;
     this.lights.sun.intensity = on ? 0.85 : 0;
     this.lights.ambient.intensity = on ? 0.42 : 1.0;
@@ -746,27 +762,33 @@ const raceScene = {
     if (this.ai) this.ai.car.children[0].castShadow = shadows;
   },
 
-  // a graphics setting changed: rebuild what it affects, without touching the
-  // state of the race
+  // a graphics setting changed: rebuild what it affects (freeing the old
+  // geometry and materials) without touching the state of the race
   rebuildGraphics() {
     const gfx = S().settings;
     const sc = R3D.scene3d;
-    if (!sc) return;
-    for (const m of this.world.tileMeshes) {
+    if (!sc || !this.world || R3D.currentScene() !== raceScene) return;
+    const oldMeshes = this.world.tileMeshes;
+    for (const m of oldMeshes) {
       sc.remove(m);
       if (m.geometry) m.geometry.dispose();
     }
+    if (oldMeshes[0]) oldMeshes[0].material.dispose();   // shared by every tile
     this.world = R3D.buildTrack(this.track, { lighting: gfx.lighting !== 0 });
     for (const m of this.world.tileMeshes) sc.add(m);
     const old = this.car;
+    sc.remove(old);
+    R3D.disposeObject(old);
     this.car = R3D.buildCar(R3D.game.carIdx, gfx.lighting !== 0, gfx.shadows !== 0);
     sc.add(this.car);
-    sc.remove(old);
+    this.placeCar();
     if (this.ai) {
       const oldAi = this.ai.car;
+      sc.remove(oldAi);
+      R3D.disposeObject(oldAi);
       this.ai.car = R3D.buildCar(this.ai.idx, gfx.lighting !== 0, gfx.shadows !== 0);
       sc.add(this.ai.car);
-      sc.remove(oldAi);
+      this.placeAI();
     }
     this.setLightLevel(gfx.lighting !== 0);
   },
@@ -776,15 +798,13 @@ const raceScene = {
     const th = this.tc;
     const bg = R3D.bgCanvas(this.theme) || R3D._bgImg[this.theme];
     const bgW = bg.width * BG_SCALE, bgH = bg.height * BG_SCALE;
-    // the background art is pinned to the horizon of whichever camera is
-    // active; looking straight down there is no horizon, so it is skipped
     const hy = this.horizon;
     ui.fillStyle = '#000'; ui.fillRect(0, 0, W, H);
-    if (hy === null || hy === undefined) {
+    if (hy === null || hy === undefined || !bgW) {
       ui.fillStyle = R3D.argb(th.ct).css; ui.fillRect(0, 0, W, H);
     } else {
       const y0 = Math.round(hy - 110 * BG_SCALE);
-      let x0 = Math.floor((-(this.camYaw * BG_SCROLL) % bgW + bgW * 4) % bgW) - bgW;
+      const x0 = Math.floor((-(this.camYaw * BG_SCROLL) % bgW + bgW * 4) % bgW) - bgW;
       if (y0 > 0) { ui.fillStyle = R3D.argb(th.N).css; ui.fillRect(0, 0, W, y0); }
       for (let x = x0; x < W; x += bgW) ui.drawImage(bg, x, y0, bgW, bgH);
       const yBot = y0 + bgH;
@@ -801,64 +821,98 @@ const raceScene = {
 
     this.drawHUD();
     if (!this.paused && this.phase !== 'prerace' && this.phase !== 'done') this.drawControls();
+    if (!this.paused) this.drawWords();
+    this.drawFinishFade();
     if (this.paused) this.drawPause();
     if (this.phase === 'prerace') this.drawPreRace();
   },
 
   // -------------------------------------------------- the AI opponent
   // It drives the racing line: the track's stations are 16 units apart, so
-  // the opponent is a position along that path, slowing for the corners.
+  // the opponent is a distance along that path, offset to one side of the
+  // road, slowing for the corners. It lines up beside you on the grid and
+  // pulls over after the finish line instead of starting another lap.
   setupAI(scene) {
-    if (R3D.game.mode !== 'mp') { this.ai = null; return; }
+    this.ai = null;
+    if (R3D.game.mode !== 'mp') return;
     const idx = (R3D.game.carIdx + 1) % 4;
     const gfx = S().settings;
     const car = R3D.buildCar(idx, gfx.lighting !== 0, gfx.shadows !== 0);
     scene.add(car);
-    this.ai = { car: car, idx: idx, dist: 5 * 3 * 16, speed: 0, start: 5 * 3 * 16 };
+    this.ai = { car: car, idx: idx, dist: 5 * 3 * 16, speed: 0, done: false };
+    this.placeAI();
   },
 
   updateAI(dt) {
     const ai = this.ai;
     if (!ai) return;
     const sts = this.world.stations;
+    const last = sts.length - 2;
+    const finishDist = this.finishSeg * 16;
+    if (ai.dist >= finishDist) ai.done = true;
+    const top = topSpeed(ai.idx);
+    let target = 0;
+    if (!ai.done) {
+      // how hard the next few corners are
+      const i0 = Math.floor(ai.dist / 16);
+      let turn = 0;
+      for (let j = 0; j < 3; j++) {
+        const a = sts[Math.min(last, i0 + j)], b = sts[Math.min(last + 1, i0 + j + 1)];
+        let d = Math.abs(Math.atan2(b.fx, -b.fz) - Math.atan2(a.fx, -a.fz));
+        if (d > Math.PI) d = Math.PI * 2 - d;
+        if (d > turn) turn = d;
+      }
+      target = top * (0.95 - Math.min(0.42, turn * 1.1));
+    }
+    ai.speed += (target - ai.speed) * Math.min(1, dt * (ai.done ? 0.9 : 1.6));
+    ai.dist = Math.min(ai.dist + ai.speed * dt * SPEED_K, last * 16);
+    this.placeAI();
+  },
+
+  placeAI() {
+    const ai = this.ai;
+    if (!ai) return;
+    const sts = this.world.stations;
     const n = sts.length - 1;
-    const top = TOPS[ai.idx] / 10;
-    const i = Math.floor(ai.dist / 16) % n;
-    const a = sts[i], b = sts[(i + 1) % n];
-    // how hard the next corner is
-    const ya = Math.atan2(a.fx, -a.fz), yb = Math.atan2(b.fx, -b.fz);
-    let turn = Math.abs(yb - ya);
-    if (turn > Math.PI) turn = Math.PI * 2 - turn;
-    const target = top * (0.95 - Math.min(0.42, turn * 1.1));
-    ai.speed += (target - ai.speed) * Math.min(1, dt * 1.6);
-    ai.dist += ai.speed * dt * SPEED_K;
-    if (ai.dist > n * 16) ai.dist = ai.start;      // one lap, then it loops
-    // place it on the line
-    const g = ai.dist / 16;
-    const k = Math.floor(g) % n, t = g - Math.floor(g);
-    const p0 = sts[k], p1 = sts[(k + 1) % n];
-    ai.car.position.set(
-      p0.x + (p1.x - p0.x) * t,
-      p0.y + (p1.y - p0.y) * t,
-      p0.z + (p1.z - p0.z) * t
-    );
+    const g = Math.max(0, Math.min(n - 1e-3, ai.dist / 16));
+    const k = Math.floor(g), t = g - k;
+    const p0 = sts[k], p1 = sts[Math.min(n, k + 1)];
+    const lane = 0.85;                 // x the 4-unit right vector = 3.4 units
+    const lx = p0.lx + (p1.lx - p0.lx) * t, lz = p0.lz + (p1.lz - p0.lz) * t;
+    const x = p0.x + (p1.x - p0.x) * t + lx * lane;
+    const z = p0.z + (p1.z - p0.z) * t + lz * lane;
+    let y = p0.y + (p1.y - p0.y) * t;
+    const gr = R3D.sampleGround(this.world, x, z, k);
+    if (gr) y = gr.y;
+    ai.car.position.set(x, y, z);
     const yaw = Math.atan2(p1.x - p0.x, -(p1.z - p0.z)) * 180 / Math.PI;
     ai.car.rotation.order = 'YZX';
     ai.car.rotation.set(0, (180 - yaw) * Math.PI / 180, 0);
   },
 
+  // how far along the racing line the player is (same units as ai.dist)
+  progressDist() {
+    const seg = this.segHint || 0;
+    const sts = this.world.stations;
+    const a = sts[seg], b = sts[seg + 1];
+    if (!a || !b) return seg * 16;
+    const dx = b.x - a.x, dz = b.z - a.z;
+    const l2 = dx * dx + dz * dz || 1;
+    const t = Math.max(0, Math.min(1, ((this.pos.x - a.x) * dx + (this.pos.z - a.z) * dz) / l2));
+    return (seg + t) * 16;
+  },
+
   // where the player is relative to the opponent: 1 = leading
   racePosition() {
     if (!this.ai) return 1;
-    const mine = (this.segHint || 0) * 16;
-    const theirs = this.ai.dist;
-    return mine >= theirs ? 1 : 2;
+    if (this.finished) return this.mpPlace || 2;
+    if (this.ai.done) return 2;
+    return this.progressDist() >= this.ai.dist ? 1 : 2;
   },
 
   // -------------------------------------------------- motion blur
   // The scene is rendered into a texture and then drawn again through a
-  // radial (zoom) blur that grows with the speed - the classic speed-blur
-  // you get at the edge of the screen when you are going fast.
+  // radial (zoom) blur that grows with the speed.
   setupBlur() {
     if (this.blurRT) return;
     const w = Math.max(2, Math.round(R3D._gl.width)), h = Math.max(2, Math.round(R3D._gl.height));
@@ -885,8 +939,6 @@ const raceScene = {
         'void main() {',
         '  vec2 dir = vUv - 0.5;',
         '  float d = length(dir);',
-        // only the far edges smear - the middle of the screen (the car and
-        // the road ahead) stays sharp
         '  float amt = strength * smoothstep(0.30, 0.85, d);',
         '  vec4 sum = vec4(0.0);',
         '  float wsum = 0.0;',
@@ -900,7 +952,13 @@ const raceScene = {
         '  gl_FragColor = sum / wsum;',
         '}',
       ].join('\n'),
-      transparent: true,
+      // The render target already holds premultiplied colour (it is cleared
+      // to transparent black and the scene draws opaque pixels into it), so
+      // the averaged result must be written out as-is. Normal blending
+      // multiplied it by alpha a second time, which drew dark fringes
+      // wherever the blur reached the transparent sky.
+      blending: THREE.NoBlending,
+      transparent: false,
       depthTest: false,
       depthWrite: false,
     });
@@ -911,12 +969,9 @@ const raceScene = {
     this.blurScene.add(this.blurQuad);
   },
 
-  // how hard the blur should be right now. The centre of the screen is left
-  // alone - that is where the car and the road ahead are, and smearing them
-  // is what makes the effect feel broken rather than fast.
   blurAmount() {
     if (S().settings.motionBlur === 0) return 0;
-    const top = TOPS[R3D.game.carIdx] / 10;
+    const top = topSpeed(R3D.game.carIdx);
     const k = (this.speed - top * 0.45) / (top * 0.55);
     return Math.max(0, Math.min(1, k)) * 0.075;
   },
@@ -954,6 +1009,7 @@ const raceScene = {
         const tex = R3D._sprTex['spr_' + key];
         if (!tex) continue;
         mat = new THREE.MeshBasicMaterial({ map: tex, alphaTest: 0.5, side: THREE.DoubleSide });
+        mat.userData.keep = true;      // shared by every race: never freed
         matCache[key] = mat;
       }
       const geos = geoCache[key] || (geoCache[key] = makeSpriteGeos(key, spr));
@@ -966,7 +1022,6 @@ const raceScene = {
 
   updateProps() {
     if (!this.propBills) return;
-    const k0 = K0;
     const v = this._v3 || (this._v3 = new THREE.Vector3());
     const camDir = this._camDir || (this._camDir = new THREE.Vector3());
     camera.getWorldDirection(camDir);
@@ -983,7 +1038,7 @@ const raceScene = {
       const w = b.spr.w[frame], h = b.spr.h[frame];
       if (!w || !h) { b.mesh.visible = false; continue; }
       if (b.frame !== frame) { b.frame = frame; b.mesh.geometry = b.geos[frame]; }
-      const k = k0 * depth / H;
+      const k = K0 * depth / H;
       b.mesh.scale.set(w * PROP_K * k, h * PROP_K * k, 1);
       b.mesh.position.set(p.x, p.y, p.z);
       b.mesh.rotation.y = Math.atan2(camera.position.x - p.x, camera.position.z - p.z);
@@ -1003,68 +1058,147 @@ const raceScene = {
   },
 
   // -------------------------------------------------- HUD
-  // A race-timing overlay: a pause box and a two-row data panel on the left,
-  // the speed box with the clock strip under it on the right. Both clusters
-  // start on the same line and their plates are the same height, so the
-  // overlay reads as one piece of instrumentation.
+  // One compact row of slanted chips, all on the same top edge and height:
+  //   left   pause · camera · [position] · stage (split + stage strip)
+  //   right  time · speed (with a rev strip along its bottom edge)
+  stageFrac(seg) {
+    const start = 15, total = Math.max(start + 1, this.finishSeg || 1);
+    return Math.max(0, Math.min(1, (seg - start) / (total - start)));
+  },
+
   drawHUD() {
     if (this.phase === 'prerace') return;
-    const units = S().settings.units;
-    const kmh = Math.round(this.speed * (units === 0 ? KMH : MPH));
-    const top = 14, plateH = 46;
-
-    // ---- top left: pause box + data panel
+    ui.save();
     this.pauseButton();
-    const total = this.finishSeg || 1;
-    const prog = Math.max(0, Math.min(1, (this.segHint || 0) / total));
-    // the position only shows when there is somebody to race
-    const rows = [];
-    if (this.ai) rows.push(['Pos.', this.racePosition() + '/2', C.white]);
-    rows.push(['Dist.', Math.round(prog * 100) + '%', C.white]);
-    rows.push(['Split', this.splitVal || '--:--',
-      this.splitVal ? (this.splitGood ? C.green : C.red) : C.faint]);
-    const dx = 52, dw = 148;
-    const rowH = 21;
-    const panelH = 8 + rows.length * rowH;
-    plate(dx, top, dw, panelH, { topLine: 'rgba(255,255,255,0.10)' });
-    rows.forEach((r, i) => {
-      const y = top + 4 + rowH * (i + 0.5);
-      tagMid(r[0], dx + 10, y, 0, C.dim, 10, 0.9);
-      textMid(r[1], dx + dw - 10, y, 8, r[2], 15, '700', 0, true);
-      if (i < rows.length - 1) {
-        ui.fillStyle = 'rgba(255,255,255,0.09)';
-        ui.fillRect(dx + 10, top + 4 + rowH * (i + 1), dw - 20, 1);
-      }
+    if (this.phase !== 'done' && !this.paused) this.cameraButton();
+    let x = 90;
+    if (this.ai) x = this.drawPosChip(x) + HUD_GAP;
+    this.drawStageChip(x);
+    this.drawClockChips();
+    ui.restore();
+  },
+
+  drawPosChip(x) {
+    const p = this.racePosition(), w = 44, y = HUD_Y, h = HUD_H;
+    const lead = p === 1;
+    plate(x, y, w, h, {
+      fill: R3D.vgrad(y, h, lead ? '#3fd47c' : '#ff5a50', lead ? '#16884a' : '#b0201c'),
+      borderColor: 'rgba(255,255,255,0.55)', topLine: 'rgba(255,255,255,0.6)',
     });
+    textMid('P' + p, x + w / 2 + 1, y + h / 2 + 1, 5, C.white, 17, '800', 0, true);
+    return x + w;
+  },
 
-    // ---- top right: speed box
-    const sx = W - 146, sw = 130;
-    plate(sx, top, sw, plateH, { topLine: 'rgba(255,255,255,0.10)' });
-    tag(units === 0 ? 'Km/h' : 'Mph', sx + 10, top + 9, 0, C.dim, 10, 0.9);
-    textMid(String(kmh), sx + sw - 10, top + 36, 8, C.white, 32, '700', 0, true);
-    // ---- the clock strip
-    ui.fillStyle = C.magenta;
-    ui.fillRect(sx, top + plateH + 6, sw, 21);
+  drawStageChip(x) {
+    const y = HUD_Y, h = HUD_H, w = 150;
+    plate(x, y, w, h);
+    const has = !!this.splitVal;
+    tagMid('Split', x + 15, y + 11, 0, C.dim, 9, 1);
+    textMid(has ? this.splitVal : '—', x + w - 14, y + 12, 8,
+      has ? (this.splitGood ? C.green : C.red) : C.faint, 14, '800', 0, true);
+    // stage strip: progress, checkpoints, opponent, finish flag
+    const bx = x + 12, bw = w - 44, by = y + 24;
+    const f = this.stageFrac(this.progressDist() / 16);
+    ui.fillStyle = 'rgba(255,255,255,0.16)';
+    ui.fillRect(bx, by, bw, 3);
+    ui.fillStyle = C.accent;
+    ui.fillRect(bx, by, Math.round(bw * f), 3);
+    for (let c = 0; c < 3; c++) {
+      const cx = bx + Math.round(bw * this.stageFrac(this.checkpoints[c] * 3));
+      ui.fillStyle = c < this.cpNext ? C.accent : 'rgba(255,255,255,0.55)';
+      ui.fillRect(cx - 1, by - 2, 2, 7);
+    }
+    if (this.ai) {
+      const ax = bx + bw * this.stageFrac(this.ai.dist / 16);
+      ui.fillStyle = C.red;
+      ui.beginPath();
+      ui.moveTo(ax, by - 1); ui.lineTo(ax - 3, by - 6); ui.lineTo(ax + 3, by - 6);
+      ui.closePath(); ui.fill();
+    }
     ui.fillStyle = C.white;
-    ui.beginPath();
-    ui.moveTo(sx + 9, top + plateH + 11); ui.lineTo(sx + 16, top + plateH + 16.5); ui.lineTo(sx + 9, top + plateH + 22);
-    ui.closePath(); ui.fill();
-    textMid(this.clockText(), sx + 22, top + plateH + 16.5, 0, C.white, 13, '700', 0.3, true);
+    ui.fillRect(bx + Math.round(bw * f) - 1, by - 2, 3, 7);
+    R3D.checkers(bx + bw + 6, by - 3, 12, 9, 3, '#ffffff', '#101318');
+  },
 
-    if (this.splitT > 0) {
-      this.splitT -= 1 / 60;
-      text(this.splitText, W / 2, 62, 5, this.splitColor, 30, '700');
+  drawClockChips() {
+    const y = HUD_Y, h = HUD_H;
+    const sw = 112, sx = W - 10 - sw;
+    const tw = 112, tx = sx - HUD_GAP - tw;
+    // time
+    plate(tx, y, tw, h, {
+      fill: R3D.vgrad(y, h, '#3b88f6', C.blueLo),
+      borderColor: 'rgba(170,210,255,0.6)', topLine: 'rgba(255,255,255,0.5)',
+    });
+    tagMid('Time', tx + 16, y + h / 2, 0, 'rgba(255,255,255,0.75)', 9, 1);
+    textMid(R3D.fmtTime(this.timeT), tx + tw - 12, y + h / 2 + 1, 8, C.white, 16, '800', 0.3, true);
+    // speed
+    const units = S().settings.units;
+    const v = Math.round(this.speed * (units === 0 ? KMH : MPH));
+    plate(sx, y, sw, h);
+    tagMid(units === 0 ? 'Km/h' : 'Mph', sx + 15, y + 12, 0, C.dim, 9, 1);
+    textMid(String(v), sx + sw - 14, y + 14, 8, C.white, 22, '800', 0, true);
+    const f = Math.max(0, Math.min(1, this.speed / topSpeed(R3D.game.carIdx)));
+    const n = 12, lit = Math.round(f * n), y0 = y + h - 7;
+    for (let i = 0; i < n; i++) {
+      const x = sx + 10 + i * 7;
+      ui.globalAlpha = i < lit ? 1 : 0.18;
+      ui.fillStyle = i >= n - 2 ? C.red : (i >= n - 4 ? C.accent : C.blueHi);
+      ui.beginPath();
+      ui.moveTo(x + 1, y0); ui.lineTo(x + 6, y0); ui.lineTo(x + 5, y0 + 3); ui.lineTo(x, y0 + 3);
+      ui.closePath(); ui.fill();
     }
-    if (this.goT > 0) {
-      text(D.lang[27], W / 2, H / 2 - 40, 5, '#ffffff', 44, '800');
-    } else if (this.wrongWay && this.phase === 'racing') {
-      tag(D.lang[91], W / 2, 66, 5, C.accent, 20, 2);
-    }
+    ui.globalAlpha = 1;
+  },
+  // big centre words: Ready / Set / Go, the split chip, wrong way
+  drawWords() {
     if (this.phase === 'countdown') {
       const labels = [D.lang[49], D.lang[59]];
-      const idx = Math.min(this.cdN, 1);
-      text(labels[idx], W / 2, H / 2 - 40, 5, '#ffffff', 44, '800');
+      this.bigWord(labels[Math.min(this.cdN, 1)], this.cd, false);
+    } else if (this.goT > 0) {
+      this.bigWord(D.lang[27], 1 - this.goT, true);
     }
+    if (this.splitT > 0 && this.phase !== 'countdown') {
+      const age = 2.5 - this.splitT;
+      const a = Math.max(0, Math.min(1, this.splitT / 0.4, age / 0.12));
+      const k = Math.min(1, age / 0.2), e = 1 - Math.pow(1 - k, 3);
+      const str = this.splitText;
+      const w = R3D.measure(str, 22, '800') * 0.88 + 48, h = 32;
+      const off = (1 - e) * 24;
+      const x = (W - w) / 2 + off, y = 54;
+      const good = this.splitGood;
+      ui.save();
+      ui.globalAlpha = a;
+      plate(x, y, w, h, {
+        fill: R3D.vgrad(y, h, good ? '#3fd47c' : '#ff5a50', good ? '#16884a' : '#b0201c'),
+        borderColor: 'rgba(255,255,255,0.6)', topLine: 'rgba(255,255,255,0.6)',
+      });
+      textMid(str, W / 2 + off, y + h / 2 + 1, 5, C.white, 22, '800', 0, true);
+      ui.restore();
+    } else if (this.wrongWay && this.phase === 'racing') {
+      const w = 230, h = 34, x = (W - w) / 2, y = 62;
+      ui.save();
+      ui.globalAlpha = 0.65 + 0.35 * Math.sin(R3D.clock * 8);
+      plate(x, y, w, h, { fill: R3D.vgrad(y, h, '#ff5a50', '#a81a18'), borderColor: 'rgba(255,220,210,0.8)' });
+      tagMid(D.lang[91], W / 2, y + h / 2, 5, C.white, 17, 2);
+      ui.restore();
+    }
+  },
+
+  // chrome word that pops in large, settles, then fades (t: 0..1)
+  bigWord(str, t, gold) {
+    const pop = Math.min(1, t / 0.15);
+    const s = 1.4 - 0.4 * (1 - Math.pow(1 - pop, 3));
+    const a = t < 0.7 ? 1 : Math.max(0, 1 - (t - 0.7) / 0.3);
+    ui.save();
+    ui.globalAlpha = a;
+    ui.translate(W / 2, H / 2 - 34);
+    ui.scale(s, s);
+    plate(-150, -32, 300, 64, { fill: 'rgba(7,18,38,0.55)', border: false, bevel: false, slant: 14 });
+    R3D.chromeText(str, 0, 2, 5, 52, { mid: true, spacing: 3, gold: gold });
+    ui.restore();
+  },
+
+  drawFinishFade() {
     if (this.phase === 'done' && this.doneT > 1) {
       const t = 1 - Math.max(0, this.coastT) / this.doneT;
       const a = t <= 0.72 ? 0 : Math.min(1, (t - 0.72) / 0.28);
@@ -1075,148 +1209,203 @@ const raceScene = {
     }
   },
 
-  // the clock strip shows M:SS.t - a stopwatch reading
-  clockText() {
-    const t = Math.max(0, this.timeT) / 10;
-    const m = Math.floor(t / 60);
-    const s = Math.floor(t % 60);
-    const d = Math.floor((t * 10) % 10);
-    return m + ':' + (s < 10 ? '0' : '') + s + '.' + d;
+  // small slanted HUD buttons (pause, camera, back)
+  hudButton(id, x, y, w, h) {
+    plate(x, y, w, h);
+    const fl = R3D.flashFor(id);
+    if (fl > 0) {
+      ui.save();
+      ui.globalAlpha = fl * 0.45;
+      R3D.slantPath(x, y, w, h, R3D.slantOf(h));
+      ui.fillStyle = '#fff';
+      ui.fill();
+      ui.restore();
+    }
   },
 
-  // the pause box, top left
   pauseButton() {
-    const x = 16, y = 14, s = 28;
-    plate(x, y, s, s, { r: 2, topLine: 'rgba(255,255,255,0.10)' });
-    R3D.iconPause(x + s / 2, y + s / 2, 14, C.white);
-    tapArea('pause', x - 5, y - 5, s + 10, s + 10, () => {
-      if (this.phase === 'racing' || this.phase === 'countdown') {
-        this.paused = true; this.pauseSel = 0; this.pausePage = 0;
-        AudioSys.stopMusic();
-      }
+    const x = 10, y = HUD_Y, w = 36, h = HUD_H;
+    this.hudButton('pause', x, y, w, h);
+    R3D.iconPause(x + w / 2, y + h / 2, 15, C.white);
+    tapArea('pause', x - 6, y - 6, w + 8, h + 10, () => {
+      if (this.phase === 'racing' || this.phase === 'countdown') this.pause();
     });
+  },
+
+  cameraButton() {
+    const x = 10 + 36 + HUD_GAP, y = HUD_Y, w = 36, h = HUD_H;
+    this.hudButton('camera', x, y, w, h);
+    R3D.iconCamera(x + w / 2 + 1, y + h / 2, 15, C.white);
+    tapArea('camera', x - 2, y - 6, w + 8, h + 10, () => this.cycleCamera(true));
   },
 
   // -------------------------------------------------- on-screen touch controls
-  // The pads are real controls, not flat boxes: a glass plate with a hairline
-  // edge and an inner highlight, a solid glyph, and an inverted fill while
-  // they are held. They are "hold" areas, so steering and throttle work
-  // together and a thumb can slide from one to the next.
+  // Outlined pads over lightly tinted glass, so the road shows through. A held
+  // pad fills amber. Each touch area is a little larger than its pad.
   drawControls() {
     if (S().settings.buttons === 0) return;
-    const bs = 76;
-    const by = H - bs - 16;
-    this.pad('L', 22, by, bs, bs, 3, R3D.isHeld('L'));
-    this.pad('R', 22 + bs + 12, by, bs, bs, 1, R3D.isHeld('R'));
-    // throttle (big) and brake (smaller) on the right
-    this.pad('U', W - 104, H - 100, 90, 90, 0, R3D.isHeld('U'), 'GAS');
-    this.pad('D', W - 194, H - 86, 70, 70, 2, R3D.isHeld('D'), 'BRAKE');
+    const b = 64;
+    this.pad('L', 16, H - b - 16, b, b, 'left', R3D.isHeld('L'));
+    this.pad('R', 16 + b + 10, H - b - 16, b, b, 'right', R3D.isHeld('R'));
+    this.pad('D', W - 16 - 80 - 10 - 64, H - 64 - 16, 64, 64, 'brake', R3D.isHeld('D'));
+    this.pad('U', W - 16 - 80, H - 88 - 16, 80, 88, 'gas', R3D.isHeld('U'));
   },
-  pad(id, x, y, w, h, dir, pressed, caption) {
-    const r = 6;
-    // the plate
-    roundRect(x, y, w, h, r);
-    const g = ui.createLinearGradient(0, y, 0, y + h);
-    if (pressed) {
-      g.addColorStop(0, 'rgba(255,196,0,0.34)');
-      g.addColorStop(1, 'rgba(255,196,0,0.16)');
+  pad(id, x, y, w, h, kind, pressed) {
+    plate(x, y, w, h, {
+      slant: 8,
+      fill: pressed ? R3D.vgrad(y, h, 'rgba(255,217,77,0.92)', 'rgba(231,154,0,0.88)') : 'rgba(7,18,38,0.30)',
+      borderColor: pressed ? '#ffe08a' : 'rgba(255,255,255,0.42)',
+      lw: 1.5,
+      topLine: pressed ? 'rgba(255,255,255,0.7)' : 'rgba(255,255,255,0.3)',
+    });
+    const col = pressed ? C.ink : 'rgba(255,255,255,0.92)';
+    const cx = x + w / 2, cy = y + h / 2;
+    if (kind === 'left' || kind === 'right') {
+      const d = kind === 'left' ? 3 : 1;
+      R3D.iconChevron(cx - 6, cy, 20, d, col, 3);
+      R3D.iconChevron(cx + 6, cy, 20, d, col, 3);
     } else {
-      g.addColorStop(0, 'rgba(228,236,246,0.16)');
-      g.addColorStop(1, 'rgba(90,104,122,0.10)');
+      const up = kind === 'gas';
+      ui.fillStyle = col;
+      ui.beginPath();
+      if (up) {
+        ui.moveTo(cx, cy - 20); ui.lineTo(cx + 13, cy + 2); ui.lineTo(cx - 13, cy + 2);
+      } else {
+        ui.moveTo(cx, cy + 2); ui.lineTo(cx + 12, cy - 16); ui.lineTo(cx - 12, cy - 16);
+      }
+      ui.closePath();
+      ui.fill();
+      tag(up ? 'Gas' : 'Brake', cx - 2, y + h - (up ? 22 : 18), 5, pressed ? C.ink : C.dim, 10, 1.6);
     }
-    ui.fillStyle = g;
-    ui.fill();
-    ui.strokeStyle = pressed ? C.accent : 'rgba(255,255,255,0.26)';
-    ui.lineWidth = 1;
-    ui.stroke();
-    // inner highlight along the top edge
-    ui.fillStyle = pressed ? 'rgba(255,220,120,0.45)' : 'rgba(255,255,255,0.13)';
-    ui.fillRect(x + 3, y + 1, w - 6, 1);
-    // the glyph: a solid triangle, inverted when held
-    const cx = x + w / 2, cy = y + h / 2 - (caption ? 7 : 0);
-    const s = w * 0.30;
-    ui.save();
-    ui.translate(cx, cy);
-    ui.rotate(dir * Math.PI / 2);
-    ui.beginPath();
-    ui.moveTo(0, -s * 0.55);
-    ui.lineTo(s * 0.52, s * 0.40);
-    ui.lineTo(-s * 0.52, s * 0.40);
-    ui.closePath();
-    ui.fillStyle = pressed ? '#101318' : 'rgba(255,255,255,0.92)';
-    ui.fill();
-    ui.restore();
-    if (caption) tag(caption, cx, y + h - 20, 5, pressed ? '#101318' : C.dim, 10, 1.6);
-    holdArea(id, x, y, w, h);
+    const e = 4;
+    holdArea(id, x - e, y - e, w + e * 2, h + e * 2);
   },
 
   // -------------------------------------------------- pre-race screen
+  modeLabel() {
+    const m = R3D.game.mode;
+    if (m === 'champ') return D.lang[17] + '  ·  Race ' + (R3D.game.trackIdx + 1) + ' of 12';
+    if (m === 'mp') return 'Multiplayer  ·  1 opponent';
+    return D.lang[71];
+  },
   drawPreRace() {
-    ui.fillStyle = 'rgba(4,5,7,0.55)';
+    ui.fillStyle = 'rgba(3,8,18,0.5)';
     ui.fillRect(0, 0, W, H);
-    // banner card at the top
-    plate(66, 14, W - 96, 104, { r: 2, fill: 'rgba(12,14,18,0.90)', topLine: 'rgba(255,255,255,0.10)' });
-    tag(R3D.game.mode === 'champ' ? D.lang[17] : D.lang[71], W / 2 + 14, 32, 5, C.accent, 12, 1.6);
-    text(this.track.name, W / 2 + 14, 50, 5, C.white, 28, '700', 0, true);
-    tag(D.cars[R3D.game.carIdx].name, W / 2 + 14, 88, 5, C.dim, 12, 1.4);
-    // big start button, kept clear of the car in the middle of the screen
-    const bw = 200, bh = 56, bx = W - bw - 26, by = H - bh - 26;
-    plate(bx, by, bw, bh, { r: 2, fill: 'rgba(255,196,0,0.16)', borderColor: C.accent, lw: 2 });
-    const pulse = 0.5 + 0.5 * Math.sin(R3D.clock * 3);
+    // the stage banner
+    const k = R3D.intro(0, 0);
+    const bx = 64, by = 14, bw = W - 64 - 40, bh = 100;
     ui.save();
-    ui.globalAlpha = 0.25 + 0.3 * pulse;
-    roundRect(bx - 3, by - 3, bw + 6, bh + 6, 4);
-    ui.strokeStyle = C.accent; ui.lineWidth = 1; ui.stroke();
+    ui.globalAlpha = k;
+    ui.translate((1 - k) * -24, 0);
+    plate(bx, by, bw, bh, { fill: 'rgba(7,18,38,0.9)', edge: C.accent, edgeW: 5 });
+    tag(this.modeLabel(), bx + 34, by + 14, 0, C.accent, 12, 1.6);
+    R3D.chromeText(this.track.name, bx + 32, by + 34, 0, 34, { spacing: 1 });
+    const best = S().scores[R3D.game.trackIdx][0];
+    tag(D.cars[R3D.game.carIdx].name + '   ·   Best ' + R3D.fmtTime(best), bx + 34, by + 78, 0, C.dim, 11, 1.2);
+    R3D.checkers(bx + bw - 72, by + 12, 48, 12, 6, 'rgba(255,255,255,0.85)', 'rgba(8,16,30,0.9)');
     ui.restore();
-    tag('Tap to start', bx + bw / 2, by + 20, 5, C.white, 17, 2);
-    tapArea('start', bx, by, bw, bh, () => {
-      AudioSys.sfx('plink1');
-      this.phase = 'countdown'; this.cd = 0; this.cdN = 0;
+
+    // start button, kept clear of the car in the middle of the screen
+    const k2 = R3D.intro(2, 0.06);
+    const sw = 210, sh = 54, sx = W - sw - 24, sy = H - sh - 24;
+    ui.save();
+    ui.globalAlpha = k2;
+    ui.translate((1 - k2) * 20, 0);
+    const pulse = 0.5 + 0.5 * Math.sin(R3D.clock * 3.2);
+    ui.save();
+    ui.globalAlpha *= 0.25 + 0.4 * pulse;
+    R3D.slantPath(sx - 5, sy - 5, sw + 10, sh + 10, R3D.slantOf(sh + 10));
+    ui.strokeStyle = C.accent;
+    ui.lineWidth = 1.5;
+    ui.stroke();
+    ui.restore();
+    R3D.menuRow('start', sx, sy, sw, sh, R3D.isTouch ? 'Tap to start' : 'Start  ·  Enter', {
+      active: true, center: true, size: 16, onTap: () => this.startCountdown(),
     });
-    // small back button
-    const bxx = 38, byy = 66, rr = 15;
-    plate(bxx - rr, byy - rr, rr * 2, rr * 2, { r: 2, fill: 'rgba(12,14,18,0.80)' });
-    R3D.iconArrow(bxx, byy, 14, 3, C.white);
-    tapArea('pback', bxx - rr - 4, byy - rr - 4, rr * 2 + 8, rr * 2 + 8, () => {
-      R3D.clearScene3d();
-      R3D.setScene(R3D.carSelectSceneRef);
-    });
+    ui.restore();
+
+    // back
+    this.hudButton('pback', 10, HUD_Y, 36, HUD_H);
+    R3D.iconChevron(29, HUD_Y + HUD_H / 2, 13, 3, C.white, 2.5);
+    tapArea('pback', 4, 4, 48, 46, () => R3D.setScene(R3D.carSelectSceneRef));
   },
 
   // -------------------------------------------------- pause overlay
   drawPause() {
-    ui.fillStyle = 'rgba(4,5,7,0.70)';
+    const k = Math.min(1, (R3D.clock - (this.pauseT || 0)) / 0.18);
+    const e = 1 - Math.pow(1 - k, 3);
+    ui.fillStyle = 'rgba(3,8,18,' + (0.74 * Math.max(e, 0.6)).toFixed(3) + ')';
     ui.fillRect(0, 0, W, H);
+    ui.save();
+    ui.globalAlpha = e;
+    ui.translate((1 - e) * 16, 0);
+    if (this.pausePage === 1) this.drawPauseSettings();
+    else this.drawPauseMain();
+    ui.restore();
+  },
+
+  drawPauseMain() {
     const items = this.pauseItems();
-    const rowH = this.pausePage === 1 ? 30 : 34;
-    const gap = this.pausePage === 1 ? 5 : 8;
-    const cw = 330, ch = (this.pausePage === 1 ? 62 : 76) + items.length * (rowH + gap);
-    const x = Math.round((W - cw) / 2), y = Math.max(8, Math.round((H - ch) / 2));
-    plate(x, y, cw, ch, { r: 2, fill: 'rgba(10,12,16,0.94)', topLine: 'rgba(255,255,255,0.10)' });
-    tag(this.pausePage === 1 ? D.lang[107] : 'Paused', W / 2, y + 24, 5, C.accent, 15, 2.2);
-    if (this.pausePage === 1) {
-      tag('Tap a row to change it', W / 2, y + 42, 5, C.faint, 10, 0.9);
-    }
-    let iy = y + (this.pausePage === 1 ? 58 : 50);
+    const rowH = 38, gap = 8;
+    const cw = 310;
+    const footer = R3D.isTouch ? 16 : 36;
+    const ch = 70 + items.length * (rowH + gap) - gap + footer;
+    const x = Math.round((W - cw) / 2), y = Math.round((H - ch) / 2);
+    plate(x, y, cw, ch, { fill: 'rgba(7,18,38,0.95)', edge: C.accent, edgeW: 5 });
+    R3D.chromeText('Paused', W / 2, y + 26, 5, 24, { mid: true, spacing: 3 });
+    tagMid(this.track.name + '   ·   ' + R3D.fmtTime(this.timeT), W / 2, y + 48, 5, C.dim, 10, 1);
+    let iy = y + 66;
     items.forEach((it, i) => {
-      const active = i === this.pauseSel;
-      plate(x + 16, iy, cw - 32, rowH, {
-        r: 2,
-        borderColor: active ? C.accent : 'rgba(255,255,255,0.12)',
-        lw: active ? 2 : 1,
-        topLine: active ? 'rgba(255,214,110,0.28)' : 'rgba(255,255,255,0.09)',
+      R3D.menuRow('p' + i, x + 22, iy, cw - 40, rowH, it.label, {
+        active: i === this.pauseSel,
+        right: it.right,
+        onTap: () => { this.pauseSel = i; this.pausePick(i); },
       });
-      if (active) { ui.fillStyle = C.accent; ui.fillRect(x + 16, iy, 3, rowH); }
-      tag(it.label, x + 30, iy + (rowH - 12) / 2, 0, active ? C.accent : C.text, 12, 0.9);
-      if (it.right) tag(it.right, x + cw - 30, iy + (rowH - 12) / 2, 8, C.accent2, 11, 0.9);
-      tapArea('p' + i, x + 16, iy, cw - 32, rowH, () => { this.pauseSel = i; this.pausePick(i); });
       iy += rowH + gap;
     });
-    if (this.pausePage !== 1) {
-      tag('Tap a row  ·  ESC to resume  ·  C for camera', W / 2, y + ch - 20, 5, C.faint, 10, 0.9);
+    if (!R3D.isTouch) {
+      tagMid('Esc to resume   ·   C for camera', W / 2, y + ch - 18, 5, C.faint, 10, 0.9);
     }
   },
+
+  drawPauseSettings() {
+    const items = this.pauseSettings();
+    const cw = 530, ch = 270;
+    const x = Math.round((W - cw) / 2), y = Math.round((H - ch) / 2);
+    plate(x, y, cw, ch, { fill: 'rgba(7,18,38,0.95)', edge: C.accent, edgeW: 5 });
+    R3D.chromeText(D.lang[107], W / 2, y + 26, 5, 22, { mid: true, spacing: 3 });
+    const colW = (cw - 44 - 12) / 2, rowH = 34, gap = 6;
+    items.forEach((it, i) => {
+      const col = Math.floor(i / 4), row = i % 4;
+      const rx = x + 24 + col * (colW + 12);
+      const ry = y + 52 + row * (rowH + gap);
+      R3D.menuRow('ps' + i, rx, ry, colW, rowH, it.label, {
+        active: i === this.pauseSel,
+        right: it.right,
+        toggle: it.toggle,
+        disabled: it.disabled,
+        size: 12,
+        onTap: () => { this.pauseSel = i; this.pausePick(i); },
+      });
+    });
+    const bw = 150, bx = x + (cw - bw) / 2, by = y + 52 + 4 * (rowH + gap) + 6;
+    R3D.menuRow('psback', bx, by, bw, rowH, D.lang[92], {
+      active: this.pauseSel === 8,
+      center: true,
+      size: 12,
+      onTap: () => { this.pauseSel = 8; this.pausePick(8); },
+    });
+  },
 };
+
+// the gamepad's B button brakes while racing instead of going back
+R3D.raceActive = () => R3D.currentScene && R3D.currentScene() === raceScene && !raceScene.paused &&
+  (raceScene.phase === 'racing' || raceScene.phase === 'countdown');
+
+// leaving the app mid-race pauses it
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden && R3D.raceActive()) raceScene.pause();
+});
 
 // background image cache
 R3D._bgImg = {};
